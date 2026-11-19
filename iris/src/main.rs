@@ -8,6 +8,7 @@ use crate::{model::Model, scalars::Scalars};
 pub mod model;
 pub mod scalars;
 pub mod softmax;
+pub mod stages;
 pub mod weights;
 
 #[derive(Parser, Debug)]
