@@ -1,7 +1,13 @@
-/// Stages are simply something that takes x inputs and turns them into y outputs.
+use std::fmt::Debug;
+
+pub mod scalars;
+pub mod softmax;
+pub mod weights;
+
+/// Layers are simply something that takes x inputs and turns them into y outputs.
 /// These may be anything from soft max for probability outputs, predict via weights,
 /// or apply scalars to normalize inputs.
-pub trait Stage {
+pub trait Layer: Clone + Debug {
 
     /// The number of inputs this stage may take.  Transform must be given a
     /// input array of this length.
@@ -14,5 +20,5 @@ pub trait Stage {
 
     /// Transform some inputs into some outputs with lengths defined by the
     /// above elements.  They MUST always have lengths matching those lengths.
-    fn transform(inputs: &[f32]) -> Vec<f32>;
+    fn transform(&self, inputs: &[f32]) -> Box<[f32]>;
 }

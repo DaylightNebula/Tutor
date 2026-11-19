@@ -2,31 +2,31 @@ use std::time::Instant;
 
 use getset::Getters;
 
-use crate::{scalars::Scalars, softmax::SoftMax, weights::Weights};
+use crate::{layers::{Layer, scalars::Scalars, softmax::SoftMax, weights::Weights}};
 
-#[derive(Getters, Copy, Clone, Debug)]
+#[derive(Getters, Clone, Debug)]
 pub struct Model<const WIDTH: usize, const DEPTH: usize> {
-    scalars: Scalars<WIDTH>,
-    weights: Weights<WIDTH, DEPTH>,
-    softmax: SoftMax<DEPTH>
+    scalars: Scalars,
+    weights: Weights,
+    softmax: SoftMax
 }
 
 impl <const WIDTH: usize, const DEPTH: usize> Model<WIDTH, DEPTH> {
 
     /// Build a new "empty" model from some scalars.
-    pub fn from_scalars(scalars: Scalars<WIDTH>) -> Self {
+    pub fn from_scalars(scalars: Scalars) -> Self {
         Self {
             scalars,
-            weights: Weights::default(),
-            softmax: SoftMax
+            weights: Weights::new(WIDTH, DEPTH),
+            softmax: SoftMax::new(DEPTH)
         }
     }
 
     /// Take a piece of row of data and give the probabilities of its outputs.
-    pub fn find_probabilities(&self, data: &[f32; WIDTH]) -> [f32; DEPTH] {
+    pub fn find_probabilities(&self, data: &[f32; WIDTH]) -> Box<[f32]> {
         let scalars_result = self.scalars.transform(data);
         let weights_result = self.weights.transform(&scalars_result);
-        return self.softmax.transform(&weights_result);
+        return self.softmax.transform(&*weights_result);
     }
 
     /// Predict which of the <depth> possible options for the given input data
@@ -49,7 +49,7 @@ impl <const WIDTH: usize, const DEPTH: usize> Model<WIDTH, DEPTH> {
     /// (miss) is returned at the end of the epoch, useful to see if training is giving better
     /// results..
     pub fn train(&mut self, data: &[([f32; WIDTH], usize)], learning_rate: f32) -> f32 {
-        let mut grad_w = [[0.0; WIDTH]; DEPTH];
+        let mut grad_w = vec![vec![0.0; WIDTH]; DEPTH];
         let mut grad_b = [0.0; DEPTH];
         let mut total_loss = 0.0;
         let n = data.len() as f32;
@@ -73,7 +73,7 @@ impl <const WIDTH: usize, const DEPTH: usize> Model<WIDTH, DEPTH> {
 
         // tweak the biases and weights by the learning rate multiplied by how wrong they where
         // done via weights back propogation step
-        self.weights.back_propagate(grad_w, grad_b, learning_rate, n);
+        self.weights.back_propagate(&grad_w, &grad_b, learning_rate, n);
 
         total_loss / n
     }

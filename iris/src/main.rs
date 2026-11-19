@@ -3,13 +3,10 @@ use std::time::Instant;
 use clap::{Parser, ValueEnum};
 use serde::Deserialize;
 
-use crate::{model::Model, scalars::Scalars};
+use crate::{model::Model, layers::scalars::Scalars};
 
+pub mod layers;
 pub mod model;
-pub mod scalars;
-pub mod softmax;
-pub mod stages;
-pub mod weights;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -82,7 +79,7 @@ fn main() -> anyhow::Result<()> {
                 });
 
             // setup a model and learning rate
-            let scalars = train.iter().map(|a| a.0).collect::<Vec<_>>();
+            let scalars = train.iter().map(|a| a.0.to_vec()).collect::<Vec<_>>();
             let scalars = Scalars::build_from_fit(&scalars);
             let mut model = Model::<4, 3>::from_scalars(scalars);
             model.train_until_stop_improvement(&train, 0.1, 1e-4, 50);
