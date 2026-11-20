@@ -130,9 +130,9 @@ impl Model {
                 println!("Epoch {epoch}:  Loss {loss:.4}  Accuracy {:.1}%", self.est_accuracy(&data) * 100.0);
             }
 
-            if epochs_without_improvement >= max_epoch_no_improve || self.est_accuracy(&data) >= 1.0 {
+            if epochs_without_improvement >= max_epoch_no_improve {
                 let end = start_time.elapsed();
-                println!("Stopped at epoch {epoch}: loss plateaued at {best_loss:.4}, training took {} ms", end.as_millis());
+                println!("Stopped at epoch {epoch}: loss plateaued at {best_loss:.4}, accuracy {:.2}%, training took {} ms", self.est_accuracy(&data) * 100.0, end.as_millis());
                 break;
             }
         }

@@ -3,7 +3,7 @@ use std::time::Instant;
 use clap::{Parser, ValueEnum};
 use serde::Deserialize;
 
-use crate::{layers::{scalars::Scalars, softmax::SoftMax, weights::Weights}, model::Model};
+use crate::{layers::{no_neg::NoNegative, scalars::Scalars, softmax::SoftMax, weights::Weights}, model::Model};
 
 pub mod layers;
 pub mod model;
@@ -27,8 +27,6 @@ pub enum Mode {
 
 #[derive(Debug, Deserialize)]
 pub struct Flower {
-    #[serde(rename = "Id")]
-    pub id: u32,
     #[serde(rename = "SepalLengthCm")]
     pub s_length: f32,
     #[serde(rename = "SepalWidthCm")]
@@ -81,10 +79,12 @@ fn main() -> anyhow::Result<()> {
             // setup a model and learning rate
             let scalars = train.iter().map(|a| a.0.to_vec()).collect::<Vec<_>>();
             let mut model = Model::blank(4, 3)
-                .add_layer(Scalars::build_from_fit(&scalars))?
-                .add_layer(Weights::new(4, 3))?
+                .add_layer(Scalars::from_fit(&scalars))?
+                .add_layer(Weights::random(4, 8, 1e-2))?
+                .add_layer(NoNegative::new(8))?
+                .add_layer(Weights::random(8, 3, 1e-2))?
                 .add_layer(SoftMax::new(3))?;
-            model.train_until_stop_improvement(&train, 0.5, 1e-4, 5000000)?;
+            model.train_until_stop_improvement(&train, 5e-1, 1e-4, 50)?;
 
             let start_time = Instant::now();
             let accuracy = model.est_accuracy(&test);

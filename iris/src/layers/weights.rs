@@ -1,4 +1,5 @@
 use getset::{CopyGetters, Getters};
+use rand::Rng;
 
 use crate::layers::Layer;
 
@@ -17,18 +18,30 @@ pub struct Weights {
     #[getset(get_copy = "pub")]
     width: usize,
     #[getset(get_copy = "pub")]
-    depth: usize
+    depth: usize,
+    #[getset(get_copy = "pub")]
+    weight_decay: f32
 }
 
 impl Weights {
     /// Create a new weights instance of the given size.
-    pub fn new(width: usize, depth: usize) -> Self {
+    pub fn random(width: usize, depth: usize, weight_decay: f32) -> Self {
+        let mut rng = rand::thread_rng();
+        let scale = (2.0 / width as f32).sqrt();
+        let weights = (0 .. depth)
+            .map(|_| {
+                (0 .. width)
+                    .map(|_| rng.gen_range(-1.0 .. 1.0) * scale)
+                    .collect()
+            })
+            .collect();
+
         Self {
-            weights: vec![vec![0.0; width]; depth],
+            weights,
             biases: vec![0.0; depth].into_boxed_slice(),
             gradient_weights: vec![vec![0.0; width]; depth],
             gradient_biases: vec![0.0; depth].into_boxed_slice(),
-            width, depth
+            width, depth, weight_decay
         }
     }
 }
@@ -84,7 +97,7 @@ impl Layer for Weights {
     fn perform_epoch_step(&mut self, learning_rate: f32, n: f32) {
         for c in 0 .. self.depth {
             for j in 0 .. self.width {
-                self.weights[c][j] -= learning_rate * self.gradient_weights[c][j] / n;
+                self.weights[c][j] -= learning_rate * (self.gradient_weights[c][j] / n + self.weight_decay * self.weights[c][j]);
                 self.gradient_weights[c][j] = 0.0;
             }
             self.biases[c] -= learning_rate * self.gradient_biases[c] / n;

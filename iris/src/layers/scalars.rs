@@ -18,7 +18,7 @@ impl Scalars {
     /// Find the best mean and standard deviation values from a set of rows to
     /// make ensure each column will be translated to a normalized roughly equal
     /// range.
-    pub fn build_from_fit(data: &Vec<Vec<f32>>) -> Self {
+    pub fn from_fit(data: &Vec<Vec<f32>>) -> Self {
         let n = data.len() as f32;
         let w = data[0].len();
 
