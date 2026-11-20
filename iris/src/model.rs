@@ -2,10 +2,11 @@ use std::{collections::LinkedList, time::Instant};
 
 use anyhow::Context;
 use getset::{CopyGetters, Getters};
+use serde::{Deserialize, Serialize};
 
 use crate::layers::Layer;
 
-#[derive(Getters, CopyGetters)]
+#[derive(Getters, CopyGetters, Serialize, Deserialize)]
 pub struct Model {
     #[getset(get = "pub")]
     layers: LinkedList<Box<dyn Layer>>,

@@ -6,6 +6,7 @@ pub mod weights;
 /// Layers are simply something that takes x inputs and turns them into y outputs.
 /// These may be anything from soft max for probability outputs, predict via weights,
 /// or apply scalars to normalize inputs.
+#[typetag::serde(tag = "type")]
 pub trait Layer {
 
     /// The number of inputs this stage may take.  Transform must be given a

@@ -1,11 +1,12 @@
 use getset::Getters;
+use serde::{Deserialize, Serialize};
 
 use crate::layers::Layer;
 
 /// To avoid different elements having different spreads (diff between lowest and highest value)
 /// from having an outsized effect on the model, we scale them all with scalars to have the same
 /// overall impact on the model.  That is the goal of this structure
-#[derive(Getters, Clone, Debug)]
+#[derive(Getters, Clone, Debug, Serialize, Deserialize)]
 pub struct Scalars {
     #[getset(get_copy = "pub")]
     mean: Vec<f32>,
@@ -44,6 +45,7 @@ impl Scalars {
     }
 }
 
+#[typetag::serde]
 impl Layer for Scalars {
 
     fn input_size(&self) -> usize {

@@ -1,10 +1,11 @@
 use getset::CopyGetters;
+use serde::{Deserialize, Serialize};
 
 use crate::layers::Layer;
 
 /// Layer that replaces all negative inputs with 0 then returns them as outputs.
 /// AKA ReLU.
-#[derive(Copy, Clone, Debug, CopyGetters)]
+#[derive(Copy, Clone, Debug, CopyGetters, Serialize, Deserialize)]
 pub struct NoNegative {
     #[getset(get_copy = "pub")]
     width: usize
@@ -17,7 +18,7 @@ impl NoNegative {
     }
 }
 
-
+#[typetag::serde]
 impl Layer for NoNegative {
     fn input_size(&self) -> usize { self.width }
     fn output_size(&self) -> usize { self.width }

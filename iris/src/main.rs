@@ -57,7 +57,7 @@ fn main() -> anyhow::Result<()> {
                 .add_layer(NoNegative::new(8))?
                 .add_layer(Weights::random(8, num_outputs, 1e-2))?
                 .add_layer(SoftMax::new(num_outputs))?;
-            model.train_until_stop_improvement(&train, 5e-1, 1e-4, 50)?;
+            model.train_until_stop_improvement(&train, 0.5, 1e-4, 50)?;
 
             let start_time = Instant::now();
             let accuracy = model.est_accuracy(&test);
@@ -69,6 +69,9 @@ fn main() -> anyhow::Result<()> {
                 duration.as_nanos(), test.len(),
                 duration.as_nanos() / test.len() as u128
             );
+
+            let binary_model = postcard::to_allocvec(&model)?;
+            std::fs::write(args.model, binary_model)?;
         },
         Mode::Execute => {
             todo!("Execute")

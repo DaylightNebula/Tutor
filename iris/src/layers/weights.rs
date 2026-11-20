@@ -1,19 +1,22 @@
 use getset::{CopyGetters, Getters};
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 
 use crate::layers::Layer;
 
 /// The raw weights of the model, the numbers that we use various matrix maths
 /// to calculate the probabilities of an option being the best result for a given input.
-#[derive(CopyGetters, Getters, Clone, Debug)]
+#[derive(CopyGetters, Getters, Clone, Debug, Serialize, Deserialize)]
 pub struct Weights {
     #[getset(get = "pub")]
     weights: Vec<Vec<f32>>,
     #[getset(get = "pub")]
     biases: Box<[f32]>,
     #[getset(get = "pub")]
+    #[serde(skip, default)]
     gradient_weights: Vec<Vec<f32>>,
     #[getset(get = "pub")]
+    #[serde(skip, default)]
     gradient_biases: Box<[f32]>,
     #[getset(get_copy = "pub")]
     width: usize,
@@ -46,15 +49,11 @@ impl Weights {
     }
 }
 
+#[typetag::serde]
 impl Layer for Weights {
 
-    fn input_size(&self) -> usize {
-        self.width
-    }
-
-    fn output_size(&self) -> usize {
-        self.depth
-    }
+    fn input_size(&self) -> usize { self.width }
+    fn output_size(&self) -> usize { self.depth }
 
     /// Use the model to take <width> inputs, score, then return the <depth> outputs.
     ///

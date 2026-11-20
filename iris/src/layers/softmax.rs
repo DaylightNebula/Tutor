@@ -1,7 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::layers::Layer;
 
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub struct SoftMax {
     num_inputs: usize
 }
@@ -12,6 +14,7 @@ impl SoftMax {
     }
 }
 
+#[typetag::serde]
 impl Layer for SoftMax {
     fn input_size(&self) -> usize {
         self.num_inputs
