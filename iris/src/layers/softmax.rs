@@ -39,4 +39,29 @@ impl Layer for SoftMax {
 
         return exps.into_boxed_slice();
     }
+
+    /// Translate the outputs we got to the outputs the previous layer would have given.
+    /// Do the same for the gradients (dLoss / dOutput).
+    fn back_propagate(
+        &mut self,
+        _inputs: &[f32],
+        outputs: &[f32],
+        output_gradient: &[f32]
+    ) -> anyhow::Result<Box<[f32]>> {
+        // Σ g·y appears in every input's gradient, so compute it once
+        let dot: f32 = output_gradient
+            .iter()
+            .zip(outputs)
+            .map(|(g, y)| g * y)
+            .sum();
+
+        // dL/dz_i = y_i · (g_i − Σ g·y)
+        let input_grads = outputs
+            .iter()
+            .zip(output_gradient)
+            .map(|(y, g)| y * (g - dot))
+            .collect::<Vec<_>>();
+
+        Ok(input_grads.into_boxed_slice())
+    }
 }

@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 pub mod scalars;
 pub mod softmax;
 pub mod weights;
@@ -7,7 +5,7 @@ pub mod weights;
 /// Layers are simply something that takes x inputs and turns them into y outputs.
 /// These may be anything from soft max for probability outputs, predict via weights,
 /// or apply scalars to normalize inputs.
-pub trait Layer: Clone + Debug {
+pub trait Layer {
 
     /// The number of inputs this stage may take.  Transform must be given a
     /// input array of this length.
@@ -21,4 +19,22 @@ pub trait Layer: Clone + Debug {
     /// Transform some inputs into some outputs with lengths defined by the
     /// above elements.  They MUST always have lengths matching those lengths.
     fn transform(&self, inputs: &[f32]) -> Box<[f32]>;
+
+    /// Used while training to pass outputs back through the model with what
+    /// the outputs should have been for training.
+    /// Only used in training.
+    ///
+    ///  Given the `inputs` this layer saw, the `outputs` it
+    /// produced, and dLoss/dOutput, adds this row's parameter gradients to the layer's running
+    /// totals and returns dLoss/dInput for the previous layer.
+    fn back_propagate(
+        &mut self,
+        inputs: &[f32],
+        outputs: &[f32],
+        output_gradient: &[f32]
+    ) -> anyhow::Result<Box<[f32]>>;
+
+    /// Apply any steps required at the end of each epoch for training.
+    /// Only used in training.
+    fn perform_epoch_step(&mut self, _learning_rate: f32, _n: f32) {}
 }

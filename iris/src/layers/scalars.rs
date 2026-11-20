@@ -65,4 +65,21 @@ impl Layer for Scalars {
         }
         return out.into_boxed_slice();
     }
+
+    /// Translate the gradients via the same equation as above to pass back the gradients
+    /// for the previous layer.
+    fn back_propagate(
+        &mut self,
+        _inputs: &[f32],
+        _outputs: &[f32],
+        output_gradient: &[f32]
+    ) -> anyhow::Result<Box<[f32]>> {
+        let input_grads = output_gradient
+            .iter()
+            .zip(&self.standard_deviation)
+            .map(|(g, std)| g / std)
+            .collect::<Vec<_>>();
+
+        Ok(input_grads.into_boxed_slice())
+    }
 }

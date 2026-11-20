@@ -3,7 +3,7 @@ use std::time::Instant;
 use clap::{Parser, ValueEnum};
 use serde::Deserialize;
 
-use crate::{model::Model, layers::scalars::Scalars};
+use crate::{layers::{scalars::Scalars, softmax::SoftMax, weights::Weights}, model::Model};
 
 pub mod layers;
 pub mod model;
@@ -11,7 +11,7 @@ pub mod model;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct Args {
-    #[arg(long, default_value = "Train")]
+    #[arg(long, default_value = "train")]
     mode: Mode,
     #[arg(short, long, default_value = "./Iris.csv")]
     input: String,
@@ -63,7 +63,7 @@ fn main() -> anyhow::Result<()> {
     let flowers = csv_reader.deserialize()
         .collect::<Result<Vec<Flower>, _>>()?
         .into_iter()
-        .map(|flower| (flower.features(), flower.species as usize))
+        .map(|flower| (Box::new(flower.features()) as Box<[f32]>, flower.species as usize))
         .collect::<Vec<_>>();
 
     match args.mode {
@@ -72,7 +72,7 @@ fn main() -> anyhow::Result<()> {
             let mut flip_flip = false;
             let (train, test): (Vec<_>, Vec<_>) = flowers
                 .iter()
-                .copied()
+                .cloned()
                 .partition(|_| {
                     flip_flip = !flip_flip;
                     flip_flip
@@ -80,9 +80,11 @@ fn main() -> anyhow::Result<()> {
 
             // setup a model and learning rate
             let scalars = train.iter().map(|a| a.0.to_vec()).collect::<Vec<_>>();
-            let scalars = Scalars::build_from_fit(&scalars);
-            let mut model = Model::<4, 3>::from_scalars(scalars);
-            model.train_until_stop_improvement(&train, 0.1, 1e-4, 50);
+            let mut model = Model::blank(4, 3)
+                .add_layer(Scalars::build_from_fit(&scalars))?
+                .add_layer(Weights::new(4, 3))?
+                .add_layer(SoftMax::new(3))?;
+            model.train_until_stop_improvement(&train, 0.5, 1e-4, 5000000)?;
 
             let start_time = Instant::now();
             let accuracy = model.est_accuracy(&test);
