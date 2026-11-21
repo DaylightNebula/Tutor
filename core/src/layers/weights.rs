@@ -61,11 +61,10 @@ use crate::layers::Layer;
 /// * Linear regression, predicting a number such as a house price from its features (depth 1).
 ///
 /// Fields:
-/// * weights: The `depth` × `width` matrix; `weights[c][j]` scales input j for output c.
-/// * biases: One constant per output, added after the weighted sum.
-/// * gradient_weights: Running total of weight gradients for the current epoch.  Not serialized.
-/// * gradient_biases: Running total of bias gradients for the current epoch.  Not serialized.
-/// * width: Number of inputs.
+/// * contents: The learned weights, biases, and input width.  `None` until `prepare_train` sizes
+///   it from the width of the layer before it.
+/// * training_info: Running gradient totals for the current epoch.  Created on the first back
+///   propagation and not serialized.
 /// * depth: Number of outputs.
 /// * weight_decay: Strength (λ) of the pull toward zero applied to weights each epoch step.
 #[derive(CopyGetters, Getters, Clone, Debug, Serialize, Deserialize)]
@@ -76,34 +75,46 @@ pub struct Weights {
     #[getset(get = "pub")]
     training_info: Option<WeightsTrainingInfo>,
     #[getset(get_copy = "pub")]
-    width: usize,
-    #[getset(get_copy = "pub")]
     depth: usize,
     #[getset(get_copy = "pub")]
     weight_decay: f32
 }
 
-#[derive(Getters, Clone, Debug, Serialize, Deserialize)]
+/// The learned parameters of a [`Weights`] layer, sized once its input width is known.
+///
+/// Fields:
+/// * weights: The `depth` × `width` matrix; `weights[c][j]` scales input j for output c.
+/// * biases: One constant per output, added after the weighted sum.
+/// * width: Number of inputs, taken from the output size of the layer before this one.
+#[derive(Getters, CopyGetters, Clone, Debug, Serialize, Deserialize)]
 pub struct WeightContents {
     #[getset(get = "pub")]
     weights: Vec<Vec<f32>>,
     #[getset(get = "pub")]
     biases: Box<[f32]>,
+    #[getset(get_copy = "pub")]
+    width: usize
 }
 
+/// Gradient totals a [`Weights`] layer collects over one epoch of training.
+///
+/// Fields:
+/// * gradient_weights: Running total of weight gradients, the same `depth` × `width` shape as the
+///   weights.
+/// * gradient_biases: Running total of bias gradients, one per output.
 #[derive(Clone, Debug)]
 pub struct WeightsTrainingInfo {
     gradient_weights: Vec<Vec<f32>>,
-    gradient_biases: Box<[f32]>,
+    gradient_biases: Box<[f32]>
 }
 
 impl Weights {
     /// Create a new weights instance of the given size.
-    pub fn random(width: usize, depth: usize, weight_decay: f32) -> Self {
+    pub fn random(num_outputs: usize, weight_decay: f32) -> Self {
         Self {
             contents: None,
             training_info: None,
-            width, depth, weight_decay
+            depth: num_outputs, weight_decay
         }
     }
 }
@@ -111,21 +122,32 @@ impl Weights {
 #[typetag::serde]
 impl Layer for Weights {
 
-    fn input_size(&self) -> usize { self.width }
-    fn output_size(&self) -> usize { self.depth }
+    fn output_size(&self, _input_count: usize) -> usize { self.depth }
 
-    fn prepare_train(&mut self, _sample_data: &[(Box<[f32]>, usize)]) -> anyhow::Result<()> {
+    /// Sizes the weights to `input_count` inputs with fresh random values and clears any gradients
+    /// left over from a previous training run.
+    fn prepare_train(
+        &mut self,
+        _sample_data: &[(Box<[f32]>, usize)],
+        input_count: usize
+    ) -> anyhow::Result<()> {
+        // he initialization scaled to the number of inputs
         let mut rng = rand::thread_rng();
-        let scale = (2.0 / self.width as f32).sqrt();
+        let scale = (2.0 / input_count as f32).sqrt();
         let weights = (0 .. self.depth)
             .map(|_| {
-                (0 .. self.width)
+                (0 .. input_count)
                     .map(|_| rng.gen_range(-1.0 .. 1.0) * scale)
                     .collect()
             })
             .collect();
 
-        self.contents = Some(WeightContents { weights, biases: vec![0.0; self.depth].into_boxed_slice() });
+        self.contents = Some(WeightContents {
+            weights,
+            biases: vec![0.0; self.depth].into_boxed_slice(),
+            width: input_count
+        });
+        self.training_info = None;
         Ok(())
     }
 
@@ -135,12 +157,13 @@ impl Layer for Weights {
     /// a function like a softmax to turn it into a probability of one output being the
     /// most likely.
     fn transform(&self, input: &[f32]) -> anyhow::Result<Box<[f32]>> {
-        let mut s = vec![0.0; self.depth];
         let Some(content) = self.contents.as_ref() else { anyhow::bail!("Weights layer not prepared before training") };
 
+        // weighted sum of every input plus the bias for each output
+        let mut s = vec![0.0; self.depth];
         for c in 0 .. self.depth {
             s[c] = content.biases[c];
-            for j in 0 .. self.width {
+            for j in 0 .. content.width {
                 s[c] += content.weights[c][j] * input[j];
             }
         }
@@ -155,23 +178,18 @@ impl Layer for Weights {
         output_grads: &[f32]
     ) -> anyhow::Result<Box<[f32]>> {
         let Some(content) = self.contents.as_ref() else { anyhow::bail!("Weights layer not prepared before training") };
-        let training_info =
-            if self.training_info.is_some() {
-                self.training_info.as_mut().unwrap()
-            } else {
-                self.training_info = Some(
-                    WeightsTrainingInfo {
-                        gradient_weights: vec![vec![0.0; self.width]; self.depth],
-                        gradient_biases: vec![0.0; self.depth].into_boxed_slice()
-                    }
-                );
-                self.training_info.as_mut().unwrap()
-            };
+
+        // gradient totals start at zero on the first row of training
+        let depth = self.depth;
+        let training_info = self.training_info.get_or_insert_with(|| WeightsTrainingInfo {
+            gradient_weights: vec![vec![0.0; content.width]; depth],
+            gradient_biases: vec![0.0; depth].into_boxed_slice()
+        });
 
         // add this row's parameter gradients and pass dLoss/dInput back
-        let mut input_grads = vec![0.0; self.width];
+        let mut input_grads = vec![0.0; content.width];
         for c in 0 .. self.depth {
-            for j in 0 .. self.width {
+            for j in 0 .. content.width {
                 training_info.gradient_weights[c][j] += output_grads[c] * inputs[j];
                 input_grads[j] += content.weights[c][j] * output_grads[c];
             }
@@ -184,21 +202,10 @@ impl Layer for Weights {
     /// Steps the weights against the averaged gradients, then clears them for the next epoch.
     fn perform_epoch_step(&mut self, learning_rate: f32, n: f32) -> anyhow::Result<()> {
         let Some(content) = self.contents.as_mut() else { anyhow::bail!("Weights layer not prepared before training") };
-        let training_info =
-            if self.training_info.is_some() {
-                self.training_info.as_mut().unwrap()
-            } else {
-                self.training_info = Some(
-                    WeightsTrainingInfo {
-                        gradient_weights: vec![vec![0.0; self.width]; self.depth],
-                        gradient_biases: vec![0.0; self.depth].into_boxed_slice()
-                    }
-                );
-                self.training_info.as_mut().unwrap()
-            };
+        let Some(training_info) = self.training_info.as_mut() else { anyhow::bail!("Training info not set, likely epoch end step called before back propagate") };
 
         for c in 0 .. self.depth {
-            for j in 0 .. self.width {
+            for j in 0 .. content.width {
                 content.weights[c][j] -= learning_rate * (training_info.gradient_weights[c][j] / n + self.weight_decay * content.weights[c][j]);
                 training_info.gradient_weights[c][j] = 0.0;
             }

@@ -45,7 +45,7 @@ pub(crate) fn design_model(
     num_outputs: usize
 ) -> anyhow::Result<ModelDesigner> {
     Model::designer(num_inputs, num_outputs)
-        .add_layer(Scalars::new(num_inputs))?
-        .add_layer(Weights::random(num_inputs, num_outputs, 1e-2))?
-        .add_layer(SoftMax::new(num_outputs))
+        .add_layer(Scalars::new())?
+        .add_layer(Weights::random(num_outputs, 1e-2))?
+        .add_layer(SoftMax)
 }

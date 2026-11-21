@@ -78,9 +78,6 @@ pub(crate) fn load_data() -> anyhow::Result<Vec<(Box<[f32]>, usize)>> {
     Ok(rows)
 }
 
-/// Width of the hidden layer in the model built by `create_model`.
-const HIDDEN_WIDTH: usize = 32;
-
 /// Builds an untrained model shaped for this data set.
 ///
 /// Uses a single 32 wide ReLU hidden layer.  The diagnoses are close to linearly separable, so a
@@ -99,9 +96,9 @@ pub(crate) fn design_model(
     num_outputs: usize
 ) -> anyhow::Result<ModelDesigner> {
     Model::designer(num_inputs, num_outputs)
-        .add_layer(Scalars::new(num_inputs))?
-        .add_layer(Weights::random(num_inputs, HIDDEN_WIDTH, 1e-2))?
-        .add_layer(ZeroNegative::new(HIDDEN_WIDTH))?
-        .add_layer(Weights::random(HIDDEN_WIDTH, num_outputs, 1e-2))?
-        .add_layer(SoftMax::new(num_outputs))
+        .add_layer(Scalars::new())?
+        .add_layer(Weights::random(32, 1e-2))?
+        .add_layer(ZeroNegative)?
+        .add_layer(Weights::random(num_outputs, 1e-2))?
+        .add_layer(SoftMax)
 }

@@ -50,26 +50,16 @@ use crate::layers::Layer;
 /// Fields:
 /// * width: Number of inputs, which is also the number of outputs.
 #[derive(Copy, Clone, Debug, CopyGetters, Serialize, Deserialize)]
-pub struct ZeroNegative {
-    #[getset(get_copy = "pub")]
-    width: usize
-}
-
-impl ZeroNegative {
-    /// Create a no negatives layer.
-    pub fn new(width: usize) -> Self {
-        Self { width }
-    }
-}
+pub struct ZeroNegative;
 
 #[typetag::serde]
 impl Layer for ZeroNegative {
-    fn input_size(&self) -> usize { self.width }
-    fn output_size(&self) -> usize { self.width }
 
-        fn prepare_train(&mut self, _sample_data: &[(Box<[f32]>, usize)]) -> anyhow::Result<()> {
-            Ok(())
-        }
+    fn output_size(&self, input_count: usize) -> usize { input_count }
+
+    fn prepare_train(&mut self, _sample_data: &[(Box<[f32]>, usize)], _input_count: usize) -> anyhow::Result<()> {
+        Ok(())
+    }
 
     fn transform(&self, inputs: &[f32]) -> anyhow::Result<Box<[f32]>> {
         return Ok(inputs.iter().map(|x| x.max(0.0)).collect());

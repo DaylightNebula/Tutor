@@ -66,7 +66,6 @@ use crate::layers::Layer;
 pub struct Scalars {
     #[getset(get = "pub")]
     scalars: Option<ScalarsInner>,
-    width: usize
 }
 
 #[derive(Getters, Clone, Debug, Serialize, Deserialize)]
@@ -79,39 +78,38 @@ pub struct ScalarsInner {
 
 impl Scalars {
     /// Create a new empty `Scalars` instance.
-    pub fn new(width: usize) -> Self {
-        Self {
-            scalars: None,
-            width
-        }
+    pub fn new() -> Self {
+        Self { scalars: None }
     }
 }
 
 #[typetag::serde]
 impl Layer for Scalars {
 
-    fn input_size(&self) -> usize { self.width }
-    fn output_size(&self) -> usize { self.width }
+    fn output_size(&self, previous_layer_num_outputs: usize) -> usize { previous_layer_num_outputs }
 
-    fn prepare_train(&mut self, sample_data: &[(Box<[f32]>, usize)]) -> anyhow::Result<()> {
+    fn prepare_train(
+        &mut self,
+        sample_data: &[(Box<[f32]>, usize)],
+        previous_layer_num_outputs: usize
+    ) -> anyhow::Result<()> {
         let n = sample_data.len() as f32;
-        let w = sample_data[0].0.len();
 
-        let mut mean = vec![0.0; w];
+        let mut mean = vec![0.0; previous_layer_num_outputs];
         for (f, _) in sample_data {
-            for j in 0 .. w {
+            for j in 0 .. previous_layer_num_outputs {
                 mean[j] += f[j] / n;
             }
         }
 
-        let mut std = vec![0.0; w];
+        let mut std = vec![0.0; previous_layer_num_outputs];
         for (f, _) in sample_data {
-            for j in 0 .. w {
+            for j in 0 .. previous_layer_num_outputs {
                 std[j] += (f[j] - mean[j]).powi(2) / n;
             }
         }
 
-        for j in 0 .. w {
+        for j in 0 .. previous_layer_num_outputs {
             std[j] = std[j].sqrt();
         }
 

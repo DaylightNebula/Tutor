@@ -55,27 +55,20 @@ use crate::layers::Layer;
 /// Fields:
 /// * num_inputs: Number of scores taken in, which is also the number of probabilities output.
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-pub struct SoftMax {
-    num_inputs: usize
-}
-
-impl SoftMax {
-    pub fn new(num_inputs: usize) -> Self {
-        Self { num_inputs }
-    }
-}
+pub struct SoftMax;
 
 #[typetag::serde]
 impl Layer for SoftMax {
-    fn input_size(&self) -> usize {
-        self.num_inputs
+
+    fn output_size(&self, previous_layer_num_outputs: usize) -> usize {
+        previous_layer_num_outputs
     }
 
-    fn output_size(&self) -> usize {
-        self.num_inputs
-    }
-
-    fn prepare_train(&mut self, _sample_data: &[(Box<[f32]>, usize)]) -> anyhow::Result<()> {
+    fn prepare_train(
+        &mut self,
+        _sample_data: &[(Box<[f32]>, usize)],
+        _previous_layer_num_outputs: usize
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -83,15 +76,15 @@ impl Layer for SoftMax {
     /// with the total sum of the output being 1.0.
     fn transform(&self, scores: &[f32]) -> anyhow::Result<Box<[f32]>> {
         let mut sum = 0.0;
-        let mut exps = vec![0.0; self.num_inputs];
+        let mut exps = vec![0.0; scores.len()];
         let max = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
 
-        for c in 0 .. self.num_inputs {
+        for c in 0 .. scores.len() {
             exps[c] = (scores[c] - max).exp();
             sum += exps[c];
         }
 
-        for c in 0 .. self.num_inputs {
+        for c in 0 .. scores.len() {
             exps[c] /= sum;
         }
 

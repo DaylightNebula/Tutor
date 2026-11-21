@@ -9,19 +9,19 @@ pub mod weights;
 #[typetag::serde(tag = "type")]
 pub trait Layer {
 
-    /// The number of inputs this stage may take.  Transform must be given a
-    /// input array of this length.
-    fn input_size(&self) -> usize;
-
     /// The number of outputs this stage will produce, useful for validating
     /// that this stage will produce the expected outputs of the model or
     /// expected inputs of the next stage.
-    fn output_size(&self) -> usize;
+    fn output_size(&self, previous_layer_num_outputs: usize) -> usize;
 
     /// Prepare this layer for training.  This may be clearing out old data to
     /// avoid influence of previous runes, establish ranges for scalars, or
     /// anything else that is needed to ensure clean repeatable training runs.
-    fn prepare_train(&mut self, sample_data: &[(Box<[f32]>, usize)]) -> anyhow::Result<()>;
+    fn prepare_train(
+        &mut self,
+        sample_data: &[(Box<[f32]>, usize)],
+        previous_layer_num_outputs: usize
+    ) -> anyhow::Result<()>;
 
     /// Transform some inputs into some outputs with lengths defined by the
     /// above elements.  They MUST always have lengths matching those lengths.

@@ -39,8 +39,7 @@ impl ModelDesigner {
 
     /// Add a new layer to this model, this adds to the end of the layer stack.
     pub fn add_layer<L: Layer + 'static>(mut self, layer: L) -> anyhow::Result<Self> {
-        if layer.input_size() != self.cur_width() { anyhow::bail!("Input size detached") }
-        self.cur_width = layer.output_size();
+        self.cur_width = layer.output_size(self.cur_width);
         self.layers.push_back(Box::new(layer));
         return Ok(self);
     }
@@ -48,8 +47,13 @@ impl ModelDesigner {
     /// Build this `ModelBuilder` into a `Model`, requires some sample data so that layers
     /// can prepare themselves, useful for doing things like finding values for scalar layers.
     pub fn build(mut self, sample_data: &[(Box<[f32]>, usize)]) -> anyhow::Result<Model> {
+        if sample_data.len() < 1 { anyhow::bail!("Sample data is empty") }
+
+        // prepare each layer with the width produced by the layer before it
+        let mut width = self.num_inputs;
         for layer in &mut self.layers {
-            layer.prepare_train(sample_data)?;
+            layer.prepare_train(sample_data, width)?;
+            width = layer.output_size(width);
         }
 
         Ok(Model::new(self.layers, self.num_inputs, self.num_outputs))
