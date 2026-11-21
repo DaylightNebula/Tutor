@@ -1,5 +1,5 @@
 use anyhow::Context;
-use tutor_core::{layers::{scalars::Scalars, softmax::SoftMax, weights::Weights, zero_neg::ZeroNegative}, model::Model};
+use tutor_core::{designer::ModelDesigner, layers::{scalars::Scalars, softmax::SoftMax, weights::Weights, zero_neg::ZeroNegative}, model::Model};
 
 /// The diagnosis of a tumor in the breast cancer data set.
 ///
@@ -94,16 +94,14 @@ const HIDDEN_WIDTH: usize = 32;
 ///
 /// # Errors
 /// * `scalars` does not take `num_inputs` inputs, so the layers do not line up.
-pub(crate) fn create_model(
-    sample_data: &[(Box<[f32]>, usize)],
+pub(crate) fn design_model(
     num_inputs: usize,
     num_outputs: usize
-) -> anyhow::Result<Model> {
-    Model::builder(num_inputs, num_outputs)
+) -> anyhow::Result<ModelDesigner> {
+    Model::designer(num_inputs, num_outputs)
         .add_layer(Scalars::new(num_inputs))?
         .add_layer(Weights::random(num_inputs, HIDDEN_WIDTH, 1e-2))?
         .add_layer(ZeroNegative::new(HIDDEN_WIDTH))?
         .add_layer(Weights::random(HIDDEN_WIDTH, num_outputs, 1e-2))?
-        .add_layer(SoftMax::new(num_outputs))?
-        .build(sample_data)
+        .add_layer(SoftMax::new(num_outputs))
 }

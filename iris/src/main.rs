@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
-use tutor_core::model::Model;
+use tutor_core::{designer::ModelDesigner, model::Model};
 
 use crate::data_set::DataSet;
 
@@ -50,9 +50,12 @@ fn main() -> anyhow::Result<()> {
                 .len();
             let num_outputs = args.data_set.num_classes();
             let sample_data = train.iter().cloned().collect::<Vec<_>>();
-            let mut model = args
+            let design = args
                 .data_set
-                .create_model(&sample_data, num_inputs, num_outputs)?;
+                .design_model(num_inputs, num_outputs)?;
+            let design_str = design.serialize()?;
+            let mut model = ModelDesigner::deserialize(&design_str)?
+                .build(&sample_data)?;
             model.train_until_stop_improvement(&train, 0.5, 1e-4, 50)?;
 
             let start_time = Instant::now();

@@ -71,10 +71,9 @@ use crate::layers::Layer;
 #[derive(CopyGetters, Getters, Clone, Debug, Serialize, Deserialize)]
 pub struct Weights {
     #[getset(get = "pub")]
-    weights: Vec<Vec<f32>>,
-    #[getset(get = "pub")]
-    biases: Box<[f32]>,
+    contents: Option<WeightContents>,
     #[serde(skip, default)]
+    #[getset(get = "pub")]
     training_info: Option<WeightsTrainingInfo>,
     #[getset(get_copy = "pub")]
     width: usize,
@@ -82,6 +81,14 @@ pub struct Weights {
     depth: usize,
     #[getset(get_copy = "pub")]
     weight_decay: f32
+}
+
+#[derive(Getters, Clone, Debug, Serialize, Deserialize)]
+pub struct WeightContents {
+    #[getset(get = "pub")]
+    weights: Vec<Vec<f32>>,
+    #[getset(get = "pub")]
+    biases: Box<[f32]>,
 }
 
 #[derive(Clone, Debug)]
@@ -93,19 +100,8 @@ pub struct WeightsTrainingInfo {
 impl Weights {
     /// Create a new weights instance of the given size.
     pub fn random(width: usize, depth: usize, weight_decay: f32) -> Self {
-        let mut rng = rand::thread_rng();
-        let scale = (2.0 / width as f32).sqrt();
-        let weights = (0 .. depth)
-            .map(|_| {
-                (0 .. width)
-                    .map(|_| rng.gen_range(-1.0 .. 1.0) * scale)
-                    .collect()
-            })
-            .collect();
-
         Self {
-            weights,
-            biases: vec![0.0; depth].into_boxed_slice(),
+            contents: None,
             training_info: None,
             width, depth, weight_decay
         }
@@ -119,6 +115,17 @@ impl Layer for Weights {
     fn output_size(&self) -> usize { self.depth }
 
     fn prepare_train(&mut self, _sample_data: &[(Box<[f32]>, usize)]) -> anyhow::Result<()> {
+        let mut rng = rand::thread_rng();
+        let scale = (2.0 / self.width as f32).sqrt();
+        let weights = (0 .. self.depth)
+            .map(|_| {
+                (0 .. self.width)
+                    .map(|_| rng.gen_range(-1.0 .. 1.0) * scale)
+                    .collect()
+            })
+            .collect();
+
+        self.contents = Some(WeightContents { weights, biases: vec![0.0; self.depth].into_boxed_slice() });
         Ok(())
     }
 
@@ -129,11 +136,12 @@ impl Layer for Weights {
     /// most likely.
     fn transform(&self, input: &[f32]) -> anyhow::Result<Box<[f32]>> {
         let mut s = vec![0.0; self.depth];
+        let Some(content) = self.contents.as_ref() else { anyhow::bail!("Weights layer not prepared before training") };
 
         for c in 0 .. self.depth {
-            s[c] = self.biases[c];
+            s[c] = content.biases[c];
             for j in 0 .. self.width {
-                s[c] += self.weights[c][j] * input[j];
+                s[c] += content.weights[c][j] * input[j];
             }
         }
 
@@ -146,6 +154,7 @@ impl Layer for Weights {
         _outputs: &[f32],
         output_grads: &[f32]
     ) -> anyhow::Result<Box<[f32]>> {
+        let Some(content) = self.contents.as_ref() else { anyhow::bail!("Weights layer not prepared before training") };
         let training_info =
             if self.training_info.is_some() {
                 self.training_info.as_mut().unwrap()
@@ -164,7 +173,7 @@ impl Layer for Weights {
         for c in 0 .. self.depth {
             for j in 0 .. self.width {
                 training_info.gradient_weights[c][j] += output_grads[c] * inputs[j];
-                input_grads[j] += self.weights[c][j] * output_grads[c];
+                input_grads[j] += content.weights[c][j] * output_grads[c];
             }
             training_info.gradient_biases[c] += output_grads[c];
         }
@@ -173,7 +182,8 @@ impl Layer for Weights {
     }
 
     /// Steps the weights against the averaged gradients, then clears them for the next epoch.
-    fn perform_epoch_step(&mut self, learning_rate: f32, n: f32) {
+    fn perform_epoch_step(&mut self, learning_rate: f32, n: f32) -> anyhow::Result<()> {
+        let Some(content) = self.contents.as_mut() else { anyhow::bail!("Weights layer not prepared before training") };
         let training_info =
             if self.training_info.is_some() {
                 self.training_info.as_mut().unwrap()
@@ -189,11 +199,13 @@ impl Layer for Weights {
 
         for c in 0 .. self.depth {
             for j in 0 .. self.width {
-                self.weights[c][j] -= learning_rate * (training_info.gradient_weights[c][j] / n + self.weight_decay * self.weights[c][j]);
+                content.weights[c][j] -= learning_rate * (training_info.gradient_weights[c][j] / n + self.weight_decay * content.weights[c][j]);
                 training_info.gradient_weights[c][j] = 0.0;
             }
-            self.biases[c] -= learning_rate * training_info.gradient_biases[c] / n;
+            content.biases[c] -= learning_rate * training_info.gradient_biases[c] / n;
             training_info.gradient_biases[c] = 0.0;
         }
+
+        Ok(())
     }
 }

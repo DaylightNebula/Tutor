@@ -1,5 +1,5 @@
 use clap::ValueEnum;
-use tutor_core::{layers::scalars::Scalars, model::Model};
+use tutor_core::designer::ModelDesigner;
 
 pub mod iris;
 pub mod auto_mpg;
@@ -47,17 +47,16 @@ impl DataSet {
     ///
     /// # Errors
     /// * `scalars` does not take `num_inputs` inputs, so the layers do not line up.
-    pub fn create_model(
+    pub fn design_model(
         &self,
-        sample_data: &[(Box<[f32]>, usize)],
         num_inputs: usize,
         num_outputs: usize
-    ) -> anyhow::Result<Model> {
+    ) -> anyhow::Result<ModelDesigner> {
         // todo give scalars a build step so we dont need to pass them through here
         match self {
-            DataSet::Iris => iris::create_model(sample_data, num_inputs, num_outputs),
-            DataSet::AutoMpg => auto_mpg::create_model(sample_data, num_inputs, num_outputs),
-            DataSet::BreastCancer => breast_cancer::create_model(sample_data, num_inputs, num_outputs)
+            DataSet::Iris => iris::design_model(num_inputs, num_outputs),
+            DataSet::AutoMpg => auto_mpg::design_model(num_inputs, num_outputs),
+            DataSet::BreastCancer => breast_cancer::design_model(num_inputs, num_outputs)
         }
     }
 

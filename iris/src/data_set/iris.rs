@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use tutor_core::{layers::{scalars::Scalars, softmax::SoftMax, weights::Weights}, model::Model};
+use tutor_core::{designer::ModelDesigner, layers::{scalars::Scalars, softmax::SoftMax, weights::Weights}, model::Model};
 
 #[derive(Debug, Deserialize)]
 pub struct Flower {
@@ -40,14 +40,12 @@ pub(crate) fn load_data() -> anyhow::Result<Vec<(Box<[f32]>, usize)>> {
     );
 }
 
-pub(crate) fn create_model(
-    sample_data: &[(Box<[f32]>, usize)],
+pub(crate) fn design_model(
     num_inputs: usize,
     num_outputs: usize
-) -> anyhow::Result<Model> {
-    Model::builder(num_inputs, num_outputs)
+) -> anyhow::Result<ModelDesigner> {
+    Model::designer(num_inputs, num_outputs)
         .add_layer(Scalars::new(num_inputs))?
         .add_layer(Weights::random(num_inputs, num_outputs, 1e-2))?
-        .add_layer(SoftMax::new(num_outputs))?
-        .build(sample_data)
+        .add_layer(SoftMax::new(num_outputs))
 }

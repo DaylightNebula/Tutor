@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{layers::Layer, model::Model};
 
 #[derive(Getters, CopyGetters, Serialize, Deserialize)]
-pub struct ModelBuilder {
+pub struct ModelDesigner {
     #[getset(get = "pub")]
     layers: LinkedList<Box<dyn Layer>>,
     #[getset(get_copy = "pub")]
@@ -17,7 +17,7 @@ pub struct ModelBuilder {
     cur_width: usize
 }
 
-impl ModelBuilder {
+impl ModelDesigner {
     /// Create a new `ModelBuilder` instance.
     pub fn new(num_inputs: usize, num_outputs: usize) -> Self {
         Self {
@@ -25,6 +25,16 @@ impl ModelBuilder {
             num_inputs, num_outputs,
             cur_width: num_inputs
         }
+    }
+
+    /// Deserialize a json string to a model design.
+    pub fn deserialize(json: &str) -> anyhow::Result<Self> {
+        return Ok(serde_json::from_str(json)?);
+    }
+
+    /// Serialize this model design to a string.
+    pub fn serialize(&self) -> anyhow::Result<String> {
+        return Ok(serde_json::to_string(&self)?);
     }
 
     /// Add a new layer to this model, this adds to the end of the layer stack.

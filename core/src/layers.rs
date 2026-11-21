@@ -43,5 +43,5 @@ pub trait Layer {
 
     /// Apply any steps required at the end of each epoch for training.
     /// Only used in training.
-    fn perform_epoch_step(&mut self, _learning_rate: f32, _n: f32) {}
+    fn perform_epoch_step(&mut self, _learning_rate: f32, _n: f32) -> anyhow::Result<()> { Ok(()) }
 }

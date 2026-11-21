@@ -4,7 +4,7 @@ use anyhow::Context;
 use getset::{CopyGetters, Getters};
 use serde::{Deserialize, Serialize};
 
-use crate::{builder::ModelBuilder, layers::Layer};
+use crate::{designer::ModelDesigner, layers::Layer};
 
 #[derive(Getters, CopyGetters, Serialize, Deserialize)]
 pub struct Model {
@@ -32,8 +32,8 @@ impl Model {
     }
 
     /// Create a new `ModelBuilder`.
-    pub fn builder(num_inputs: usize, num_outputs: usize) -> ModelBuilder {
-        ModelBuilder::new(num_inputs, num_outputs)
+    pub fn designer(num_inputs: usize, num_outputs: usize) -> ModelDesigner {
+        ModelDesigner::new(num_inputs, num_outputs)
     }
 
     /// Take a piece of row of data and give the probabilities of its outputs.
@@ -94,7 +94,7 @@ impl Model {
 
         // step every layer's parameters once per epoch
         for layer in &mut self.layers {
-            layer.perform_epoch_step(learning_rate, n);
+            layer.perform_epoch_step(learning_rate, n)?;
         }
 
         Ok(total_loss / n)
