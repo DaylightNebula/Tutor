@@ -40,9 +40,14 @@ pub(crate) fn load_data() -> anyhow::Result<Vec<(Box<[f32]>, usize)>> {
     );
 }
 
-pub(crate) fn create_model(scalars: Scalars, num_inputs: usize, num_outputs: usize) -> anyhow::Result<Model> {
-    Model::blank(num_inputs, num_outputs)
-        .add_layer(scalars)?
+pub(crate) fn create_model(
+    sample_data: &[(Box<[f32]>, usize)],
+    num_inputs: usize,
+    num_outputs: usize
+) -> anyhow::Result<Model> {
+    Model::builder(num_inputs, num_outputs)
+        .add_layer(Scalars::new(num_inputs))?
         .add_layer(Weights::random(num_inputs, num_outputs, 1e-2))?
-        .add_layer(SoftMax::new(num_outputs))
+        .add_layer(SoftMax::new(num_outputs))?
+        .build(sample_data)
 }

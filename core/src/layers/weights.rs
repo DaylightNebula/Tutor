@@ -74,18 +74,20 @@ pub struct Weights {
     weights: Vec<Vec<f32>>,
     #[getset(get = "pub")]
     biases: Box<[f32]>,
-    #[getset(get = "pub")]
     #[serde(skip, default)]
-    gradient_weights: Vec<Vec<f32>>,
-    #[getset(get = "pub")]
-    #[serde(skip, default)]
-    gradient_biases: Box<[f32]>,
+    training_info: Option<WeightsTrainingInfo>,
     #[getset(get_copy = "pub")]
     width: usize,
     #[getset(get_copy = "pub")]
     depth: usize,
     #[getset(get_copy = "pub")]
     weight_decay: f32
+}
+
+#[derive(Clone, Debug)]
+pub struct WeightsTrainingInfo {
+    gradient_weights: Vec<Vec<f32>>,
+    gradient_biases: Box<[f32]>,
 }
 
 impl Weights {
@@ -104,8 +106,7 @@ impl Weights {
         Self {
             weights,
             biases: vec![0.0; depth].into_boxed_slice(),
-            gradient_weights: vec![vec![0.0; width]; depth],
-            gradient_biases: vec![0.0; depth].into_boxed_slice(),
+            training_info: None,
             width, depth, weight_decay
         }
     }
@@ -117,12 +118,16 @@ impl Layer for Weights {
     fn input_size(&self) -> usize { self.width }
     fn output_size(&self) -> usize { self.depth }
 
+    fn prepare_train(&mut self, _sample_data: &[(Box<[f32]>, usize)]) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     /// Use the model to take <width> inputs, score, then return the <depth> outputs.
     ///
     /// The output numbers from this will be kind of random, not a probability, use
     /// a function like a softmax to turn it into a probability of one output being the
     /// most likely.
-    fn transform(&self, input: &[f32]) -> Box<[f32]> {
+    fn transform(&self, input: &[f32]) -> anyhow::Result<Box<[f32]>> {
         let mut s = vec![0.0; self.depth];
 
         for c in 0 .. self.depth {
@@ -132,7 +137,7 @@ impl Layer for Weights {
             }
         }
 
-        return s.into_boxed_slice();
+        return Ok(s.into_boxed_slice());
     }
 
     fn back_propagate(
@@ -141,14 +146,27 @@ impl Layer for Weights {
         _outputs: &[f32],
         output_grads: &[f32]
     ) -> anyhow::Result<Box<[f32]>> {
+        let training_info =
+            if self.training_info.is_some() {
+                self.training_info.as_mut().unwrap()
+            } else {
+                self.training_info = Some(
+                    WeightsTrainingInfo {
+                        gradient_weights: vec![vec![0.0; self.width]; self.depth],
+                        gradient_biases: vec![0.0; self.depth].into_boxed_slice()
+                    }
+                );
+                self.training_info.as_mut().unwrap()
+            };
+
         // add this row's parameter gradients and pass dLoss/dInput back
         let mut input_grads = vec![0.0; self.width];
         for c in 0 .. self.depth {
             for j in 0 .. self.width {
-                self.gradient_weights[c][j] += output_grads[c] * inputs[j];
+                training_info.gradient_weights[c][j] += output_grads[c] * inputs[j];
                 input_grads[j] += self.weights[c][j] * output_grads[c];
             }
-            self.gradient_biases[c] += output_grads[c];
+            training_info.gradient_biases[c] += output_grads[c];
         }
 
         Ok(input_grads.into_boxed_slice())
@@ -156,13 +174,26 @@ impl Layer for Weights {
 
     /// Steps the weights against the averaged gradients, then clears them for the next epoch.
     fn perform_epoch_step(&mut self, learning_rate: f32, n: f32) {
+        let training_info =
+            if self.training_info.is_some() {
+                self.training_info.as_mut().unwrap()
+            } else {
+                self.training_info = Some(
+                    WeightsTrainingInfo {
+                        gradient_weights: vec![vec![0.0; self.width]; self.depth],
+                        gradient_biases: vec![0.0; self.depth].into_boxed_slice()
+                    }
+                );
+                self.training_info.as_mut().unwrap()
+            };
+
         for c in 0 .. self.depth {
             for j in 0 .. self.width {
-                self.weights[c][j] -= learning_rate * (self.gradient_weights[c][j] / n + self.weight_decay * self.weights[c][j]);
-                self.gradient_weights[c][j] = 0.0;
+                self.weights[c][j] -= learning_rate * (training_info.gradient_weights[c][j] / n + self.weight_decay * self.weights[c][j]);
+                training_info.gradient_weights[c][j] = 0.0;
             }
-            self.biases[c] -= learning_rate * self.gradient_biases[c] / n;
-            self.gradient_biases[c] = 0.0;
+            self.biases[c] -= learning_rate * training_info.gradient_biases[c] / n;
+            training_info.gradient_biases[c] = 0.0;
         }
     }
 }

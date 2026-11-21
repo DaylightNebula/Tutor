@@ -1,4 +1,4 @@
-use getset::Getters;
+use getset::{CopyGetters, Getters};
 use serde::{Deserialize, Serialize};
 
 use crate::layers::Layer;
@@ -62,32 +62,50 @@ use crate::layers::Layer;
 /// * mean: Average value of each input column, learned from the fit data.
 /// * standard_deviation: Spread of each input column, learned from the fit data.  Each input is
 ///   divided by its column's value.
-#[derive(Getters, Clone, Debug, Serialize, Deserialize)]
+#[derive(Getters, CopyGetters, Clone, Debug, Serialize, Deserialize)]
 pub struct Scalars {
-    #[getset(get_copy = "pub")]
+    #[getset(get = "pub")]
+    scalars: Option<ScalarsInner>,
+    width: usize
+}
+
+#[derive(Getters, Clone, Debug, Serialize, Deserialize)]
+pub struct ScalarsInner {
+    #[getset(get = "pub")]
     mean: Vec<f32>,
-    #[getset(get_copy = "pub")]
+    #[getset(get = "pub")]
     standard_deviation: Vec<f32>,
 }
 
 impl Scalars {
+    /// Create a new empty `Scalars` instance.
+    pub fn new(width: usize) -> Self {
+        Self {
+            scalars: None,
+            width
+        }
+    }
+}
 
-    /// Find the best mean and standard deviation values from a set of rows to
-    /// make ensure each column will be translated to a normalized roughly equal
-    /// range.
-    pub fn from_fit(data: &Vec<Vec<f32>>) -> Self {
-        let n = data.len() as f32;
-        let w = data[0].len();
+#[typetag::serde]
+impl Layer for Scalars {
+
+    fn input_size(&self) -> usize { self.width }
+    fn output_size(&self) -> usize { self.width }
+
+    fn prepare_train(&mut self, sample_data: &[(Box<[f32]>, usize)]) -> anyhow::Result<()> {
+        let n = sample_data.len() as f32;
+        let w = sample_data[0].0.len();
 
         let mut mean = vec![0.0; w];
-        for f in data {
+        for (f, _) in sample_data {
             for j in 0 .. w {
                 mean[j] += f[j] / n;
             }
         }
 
         let mut std = vec![0.0; w];
-        for f in data {
+        for (f, _) in sample_data {
             for j in 0 .. w {
                 std[j] += (f[j] - mean[j]).powi(2) / n;
             }
@@ -97,31 +115,25 @@ impl Scalars {
             std[j] = std[j].sqrt();
         }
 
-        return Scalars { mean, standard_deviation: std };
-    }
-}
+        let inner = ScalarsInner { mean, standard_deviation: std };
+        self.scalars = Some(inner);
 
-#[typetag::serde]
-impl Layer for Scalars {
-
-    fn input_size(&self) -> usize {
-        self.mean.len()
-    }
-
-    fn output_size(&self) -> usize {
-        self.mean.len()
+        Ok(())
     }
 
     /// Take some unscaled numbers and scale them using the mean and standard
     /// deviation in this struct into the [-1, 1] range, assuming that this Scalars
     /// instance was given data containing roughly the lowest and highest values
     /// when it was built.
-    fn transform(&self, unscaled: &[f32]) -> Box<[f32]> {
+    fn transform(&self, unscaled: &[f32]) -> anyhow::Result<Box<[f32]>> {
+        let Some(inner) = &self.scalars else { anyhow::bail!("Scalar layer not prepared") };
+
         let mut out = vec![0.0; unscaled.len()];
         for j in 0 .. unscaled.len() {
-            out[j] = (unscaled[j] - self.mean[j]) / self.standard_deviation[j];
+            out[j] = (unscaled[j] - inner.mean[j]) / inner.standard_deviation[j];
         }
-        return out.into_boxed_slice();
+
+        return Ok(out.into_boxed_slice());
     }
 
     /// Translate the gradients via the same equation as above to pass back the gradients
@@ -132,9 +144,11 @@ impl Layer for Scalars {
         _outputs: &[f32],
         output_gradient: &[f32]
     ) -> anyhow::Result<Box<[f32]>> {
+        let Some(inner) = &self.scalars else { anyhow::bail!("Scalar layer not prepared") };
+
         let input_grads = output_gradient
             .iter()
-            .zip(&self.standard_deviation)
+            .zip(&inner.standard_deviation)
             .map(|(g, std)| g / std)
             .collect::<Vec<_>>();
 

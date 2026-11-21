@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
-use tutor_core::{layers::scalars::Scalars, model::Model};
+use tutor_core::model::Model;
 
 use crate::data_set::DataSet;
 
@@ -49,14 +49,14 @@ fn main() -> anyhow::Result<()> {
                 .0
                 .len();
             let num_outputs = args.data_set.num_classes();
-            let scalars = train.iter().map(|a| a.0.to_vec()).collect::<Vec<_>>();
+            let sample_data = train.iter().cloned().collect::<Vec<_>>();
             let mut model = args
                 .data_set
-                .create_model(Scalars::from_fit(&scalars), num_inputs, num_outputs)?;
+                .create_model(&sample_data, num_inputs, num_outputs)?;
             model.train_until_stop_improvement(&train, 0.5, 1e-4, 50)?;
 
             let start_time = Instant::now();
-            let accuracy = model.est_accuracy(&test);
+            let accuracy = model.est_accuracy(&test)?;
             let duration = start_time.elapsed();
 
             println!("Final accuracy: {:.5}%", accuracy * 100.0);
@@ -82,7 +82,7 @@ fn main() -> anyhow::Result<()> {
             let model: Model = postcard::from_bytes(&binary_model)?;
 
             let start_time = Instant::now();
-            let accuracy = model.est_accuracy(&data_set);
+            let accuracy = model.est_accuracy(&data_set)?;
             let duration = start_time.elapsed();
 
             println!("Accuracy: {:.5}%", accuracy * 100.0);

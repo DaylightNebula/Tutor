@@ -67,8 +67,12 @@ impl Layer for ZeroNegative {
     fn input_size(&self) -> usize { self.width }
     fn output_size(&self) -> usize { self.width }
 
-    fn transform(&self, inputs: &[f32]) -> Box<[f32]> {
-        inputs.iter().map(|x| x.max(0.0)).collect()
+        fn prepare_train(&mut self, _sample_data: &[(Box<[f32]>, usize)]) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+    fn transform(&self, inputs: &[f32]) -> anyhow::Result<Box<[f32]>> {
+        return Ok(inputs.iter().map(|x| x.max(0.0)).collect());
     }
 
     /// Apply the same rule as transform by zipping inputs with gradients to

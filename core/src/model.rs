@@ -4,7 +4,7 @@ use anyhow::Context;
 use getset::{CopyGetters, Getters};
 use serde::{Deserialize, Serialize};
 
-use crate::layers::Layer;
+use crate::{builder::ModelBuilder, layers::Layer};
 
 #[derive(Getters, CopyGetters, Serialize, Deserialize)]
 pub struct Model {
@@ -13,45 +13,43 @@ pub struct Model {
     #[getset(get_copy = "pub")]
     num_inputs: usize,
     #[getset(get_copy = "pub")]
-    num_outputs: usize,
-    #[getset(get_copy = "pub")]
-    cur_width: usize
+    num_outputs: usize
 }
 
 impl Model {
 
-    /// Create a new blank model.
-    pub fn blank(num_inputs: usize, num_outputs: usize) -> Self {
+    /// Create a new `Model` instance.
+    pub fn new(
+        layers: LinkedList<Box<dyn Layer>>,
+        num_inputs: usize,
+        num_outputs: usize
+    ) -> Self {
         Self {
-            layers: LinkedList::new(),
+            layers,
             num_inputs,
-            num_outputs,
-            cur_width: num_inputs
+            num_outputs
         }
     }
 
-    /// Add a new layer to this model, this adds to the end of the layer stack.
-    pub fn add_layer<L: Layer + 'static>(mut self, layer: L) -> anyhow::Result<Self> {
-        if layer.input_size() != self.cur_width() { anyhow::bail!("Input size detached") }
-        self.cur_width = layer.output_size();
-        self.layers.push_back(Box::new(layer));
-        return Ok(self);
+    /// Create a new `ModelBuilder`.
+    pub fn builder(num_inputs: usize, num_outputs: usize) -> ModelBuilder {
+        ModelBuilder::new(num_inputs, num_outputs)
     }
 
     /// Take a piece of row of data and give the probabilities of its outputs.
-    pub fn find_probabilities(&self, inputs: &[f32]) -> Box<[f32]> {
+    pub fn find_probabilities(&self, inputs: &[f32]) -> anyhow::Result<Box<[f32]>> {
         let mut results = inputs.to_vec().into_boxed_slice();
         for layer in self.layers.iter() {
-            results = layer.transform(&results);
+            results = layer.transform(&results)?;
         }
-        return results;
+        return Ok(results);
     }
 
     /// Predict which of the <depth> possible options for the given input data
     /// is most likely.
-    pub fn predict(&self, data: &[f32]) -> usize {
+    pub fn predict(&self, data: &[f32]) -> anyhow::Result<usize> {
         let mut best = 0;
-        let probs = self.find_probabilities(data);
+        let probs = self.find_probabilities(data)?;
 
         for c in 1 .. self.num_outputs {
             if probs[c] > probs[best] {
@@ -59,7 +57,7 @@ impl Model {
             }
         }
 
-        return best;
+        return Ok(best);
     }
 
     /// Perform a training epoch from a list of data.  The data should be given a list of inputs
@@ -75,7 +73,7 @@ impl Model {
             // forward pass, keeping every layer's output; activations[i] is layer i's input
             let mut activations: Vec<Box<[f32]>> = vec![input.to_vec().into_boxed_slice()];
             for (i, layer) in self.layers.iter().enumerate() {
-                let next = layer.transform(&activations[i]);
+                let next = layer.transform(&activations[i])?;
                 activations.push(next);
             }
 
@@ -128,12 +126,12 @@ impl Model {
             }
 
             if epoch % 100 == 0 {
-                println!("Epoch {epoch}:  Loss {loss:.4}  Accuracy {:.1}%", self.est_accuracy(&data) * 100.0);
+                println!("Epoch {epoch}:  Loss {loss:.4}  Accuracy {:.1}%", self.est_accuracy(&data)? * 100.0);
             }
 
             if epochs_without_improvement >= max_epoch_no_improve {
                 let end = start_time.elapsed();
-                println!("Stopped at epoch {epoch}: loss plateaued at {best_loss:.4}, accuracy {:.2}%, training took {} ms", self.est_accuracy(&data) * 100.0, end.as_millis());
+                println!("Stopped at epoch {epoch}: loss plateaued at {best_loss:.4}, accuracy {:.2}%, training took {} ms", self.est_accuracy(&data)? * 100.0, end.as_millis());
                 break;
             }
         }
@@ -143,11 +141,14 @@ impl Model {
 
     /// Use a given list of inputs and expected output pairs, estimate the accuracy of this model
     /// as a percentage.
-    pub fn est_accuracy(&self, data: &[(Box<[f32]>, usize)]) -> f32 {
-        let correct = data
-            .iter()
-            .filter(|(x, label)| self.predict(x) == *label)
-            .count();
-        return correct as f32 / data.len() as f32;
+    pub fn est_accuracy(&self, data: &[(Box<[f32]>, usize)]) -> anyhow::Result<f32> {
+        let mut sum = 0;
+        for (x, label) in data.iter() {
+            if self.predict(x)? == *label {
+                sum += 1;
+            }
+        }
+
+        return Ok(sum as f32 / data.len() as f32);
     }
 }

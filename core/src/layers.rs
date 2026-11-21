@@ -18,9 +18,14 @@ pub trait Layer {
     /// expected inputs of the next stage.
     fn output_size(&self) -> usize;
 
+    /// Prepare this layer for training.  This may be clearing out old data to
+    /// avoid influence of previous runes, establish ranges for scalars, or
+    /// anything else that is needed to ensure clean repeatable training runs.
+    fn prepare_train(&mut self, sample_data: &[(Box<[f32]>, usize)]) -> anyhow::Result<()>;
+
     /// Transform some inputs into some outputs with lengths defined by the
     /// above elements.  They MUST always have lengths matching those lengths.
-    fn transform(&self, inputs: &[f32]) -> Box<[f32]>;
+    fn transform(&self, inputs: &[f32]) -> anyhow::Result<Box<[f32]>>;
 
     /// Used while training to pass outputs back through the model with what
     /// the outputs should have been for training.

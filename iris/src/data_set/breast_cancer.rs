@@ -94,11 +94,16 @@ const HIDDEN_WIDTH: usize = 32;
 ///
 /// # Errors
 /// * `scalars` does not take `num_inputs` inputs, so the layers do not line up.
-pub(crate) fn create_model(scalars: Scalars, num_inputs: usize, num_outputs: usize) -> anyhow::Result<Model> {
-    Model::blank(num_inputs, num_outputs)
-        .add_layer(scalars)?
+pub(crate) fn create_model(
+    sample_data: &[(Box<[f32]>, usize)],
+    num_inputs: usize,
+    num_outputs: usize
+) -> anyhow::Result<Model> {
+    Model::builder(num_inputs, num_outputs)
+        .add_layer(Scalars::new(num_inputs))?
         .add_layer(Weights::random(num_inputs, HIDDEN_WIDTH, 1e-2))?
         .add_layer(ZeroNegative::new(HIDDEN_WIDTH))?
         .add_layer(Weights::random(HIDDEN_WIDTH, num_outputs, 1e-2))?
-        .add_layer(SoftMax::new(num_outputs))
+        .add_layer(SoftMax::new(num_outputs))?
+        .build(sample_data)
 }

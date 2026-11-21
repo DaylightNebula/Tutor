@@ -75,9 +75,13 @@ impl Layer for SoftMax {
         self.num_inputs
     }
 
+    fn prepare_train(&mut self, _sample_data: &[(Box<[f32]>, usize)]) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     /// Turn some random result scores into a probably scaled from [0, 1]
     /// with the total sum of the output being 1.0.
-    fn transform(&self, scores: &[f32]) -> Box<[f32]> {
+    fn transform(&self, scores: &[f32]) -> anyhow::Result<Box<[f32]>> {
         let mut sum = 0.0;
         let mut exps = vec![0.0; self.num_inputs];
         let max = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
@@ -91,7 +95,7 @@ impl Layer for SoftMax {
             exps[c] /= sum;
         }
 
-        return exps.into_boxed_slice();
+        return Ok(exps.into_boxed_slice());
     }
 
     /// Translate the outputs we got to the outputs the previous layer would have given.
