@@ -2,12 +2,11 @@ use std::time::Instant;
 
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
+use tutor_core::{layers::{zero_neg::ZeroNegative, scalars::Scalars, softmax::SoftMax, weights::Weights}, model::Model};
 
-use crate::{data_set::DataSet, layers::{zero_neg::ZeroNegative, scalars::Scalars, softmax::SoftMax, weights::Weights}, model::Model};
+use crate::data_set::DataSet;
 
 pub mod data_set;
-pub mod layers;
-pub mod model;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
