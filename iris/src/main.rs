@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
-use tutor_core::{layers::{zero_neg::ZeroNegative, scalars::Scalars, softmax::SoftMax, weights::Weights}, model::Model};
+use tutor_core::{layers::scalars::Scalars, model::Model};
 
 use crate::data_set::DataSet;
 
@@ -15,8 +15,8 @@ pub struct Args {
     mode: Mode,
     #[arg(short, long, default_value = "iris")]
     data_set: DataSet,
-    #[arg(short, long, default_value = "./model.tutor")]
-    model: String
+    #[arg(short, long)]
+    model: Option<String>
 }
 
 #[derive(Clone, Copy, ValueEnum, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -50,12 +50,9 @@ fn main() -> anyhow::Result<()> {
                 .len();
             let num_outputs = args.data_set.num_classes();
             let scalars = train.iter().map(|a| a.0.to_vec()).collect::<Vec<_>>();
-            let mut model = Model::blank(num_inputs, num_outputs)
-                .add_layer(Scalars::from_fit(&scalars))?
-                .add_layer(Weights::random(num_inputs, 8, 1e-2))?
-                .add_layer(ZeroNegative::new(8))?
-                .add_layer(Weights::random(8, num_outputs, 1e-2))?
-                .add_layer(SoftMax::new(num_outputs))?;
+            let mut model = args
+                .data_set
+                .create_model(Scalars::from_fit(&scalars), num_inputs, num_outputs)?;
             model.train_until_stop_improvement(&train, 0.5, 1e-4, 50)?;
 
             let start_time = Instant::now();
@@ -69,11 +66,19 @@ fn main() -> anyhow::Result<()> {
                 duration.as_nanos() / test.len() as u128
             );
 
-            let binary_model = postcard::to_allocvec(&model)?;
-            std::fs::write(args.model, binary_model)?;
+            // save the trained model, skipped when no path is given such as for test runs
+            if let Some(model_path) = args.model {
+                let binary_model = postcard::to_allocvec(&model)?;
+                std::fs::write(&model_path, binary_model)
+                    .with_context(|| format!("failed to write model to {model_path}"))?;
+            }
         },
         Mode::Execute => {
-            let binary_model = std::fs::read(args.model)?;
+            let model_path = args
+                .model
+                .context("--model is required to execute a saved model")?;
+            let binary_model = std::fs::read(&model_path)
+                .with_context(|| format!("failed to read model from {model_path}"))?;
             let model: Model = postcard::from_bytes(&binary_model)?;
 
             let start_time = Instant::now();

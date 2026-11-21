@@ -1,0 +1,4 @@
+[ ] Build steps in models
+[ ] Untrained model format (not save build steps)
+[ ] Swap gradients into an option
+[ ] Make the actual weights in a weights layer optional for the untrained format

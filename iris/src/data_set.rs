@@ -1,4 +1,5 @@
 use clap::ValueEnum;
+use tutor_core::{layers::scalars::Scalars, model::Model};
 
 pub mod iris;
 pub mod auto_mpg;
@@ -31,6 +32,27 @@ impl DataSet {
             DataSet::Iris => iris::load_data(),
             DataSet::AutoMpg => auto_mpg::load_data(),
             DataSet::BreastCancer => breast_cancer::load_data()
+        }
+    }
+
+    /// Builds an untrained model shaped for this data set.
+    ///
+    /// Each data set has its own layer stack, sized from tuning runs, starting with `scalars` to
+    /// normalize the inputs and ending with a softmax over the classes.
+    ///
+    /// # Parameters
+    /// * scalars: Input normalization fitted to the training rows, used as the first layer.
+    /// * num_inputs: Number of input features in each row.
+    /// * num_outputs: Number of classes the model chooses between.
+    ///
+    /// # Errors
+    /// * `scalars` does not take `num_inputs` inputs, so the layers do not line up.
+    pub fn create_model(&self, scalars: Scalars, num_inputs: usize, num_outputs: usize) -> anyhow::Result<Model> {
+        // todo give scalars a build step so we dont need to pass them through here
+        match self {
+            DataSet::Iris => iris::create_model(scalars, num_inputs, num_outputs),
+            DataSet::AutoMpg => auto_mpg::create_model(scalars, num_inputs, num_outputs),
+            DataSet::BreastCancer => breast_cancer::create_model(scalars, num_inputs, num_outputs)
         }
     }
 

@@ -1,5 +1,6 @@
 use anyhow::Context;
 use serde::Deserialize;
+use tutor_core::{layers::{scalars::Scalars, softmax::SoftMax, weights::Weights, zero_neg::ZeroNegative}, model::Model};
 
 /// A single car row from the auto mpg data set.
 ///
@@ -104,4 +105,29 @@ pub(crate) fn load_data() -> anyhow::Result<Vec<(Box<[f32]>, usize)>> {
             })
             .collect()
     )
+}
+
+/// Width of the hidden layer in the model built by `create_model`.
+const HIDDEN_WIDTH: usize = 64;
+
+/// Builds an untrained model shaped for this data set.
+///
+/// Uses a single 64 wide ReLU hidden layer.  The fuel bands are not linearly separable from the
+/// car specs, and accuracy rose with width up to about 64 then leveled off, while a second hidden
+/// layer lowered it.
+///
+/// # Parameters
+/// * scalars: Input normalization fitted to the training rows, used as the first layer.
+/// * num_inputs: Number of input features in each row.
+/// * num_outputs: Number of classes the model chooses between.
+///
+/// # Errors
+/// * `scalars` does not take `num_inputs` inputs, so the layers do not line up.
+pub(crate) fn create_model(scalars: Scalars, num_inputs: usize, num_outputs: usize) -> anyhow::Result<Model> {
+    Model::blank(num_inputs, num_outputs)
+        .add_layer(scalars)?
+        .add_layer(Weights::random(num_inputs, HIDDEN_WIDTH, 1e-2))?
+        .add_layer(ZeroNegative::new(HIDDEN_WIDTH))?
+        .add_layer(Weights::random(HIDDEN_WIDTH, num_outputs, 1e-2))?
+        .add_layer(SoftMax::new(num_outputs))
 }
