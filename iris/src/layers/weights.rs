@@ -4,8 +4,70 @@ use serde::{Deserialize, Serialize};
 
 use crate::layers::Layer;
 
-/// The raw weights of the model, the numbers that we use various matrix maths
-/// to calculate the probabilities of an option being the best result for a given input.
+/// Weights (fully connected / dense / linear layer)
+///
+/// # Purpose
+///
+/// Holds the raw, learnable numbers of the model.  Every output is a weighted sum of every
+/// input plus a bias, so this is the layer that actually "learns" during training.  Its outputs
+/// are raw scores rather than probabilities; follow it with a layer like
+/// [`SoftMax`](crate::layers::softmax::SoftMax) to turn them into probabilities, or with
+/// [`ZeroNegative`](crate::layers::zero_neg::ZeroNegative) to build a hidden layer.
+///
+/// # How it works
+///
+/// With an input vector x of length `width`, a weight matrix W of size `depth` × `width`, and a
+/// bias vector b of length `depth`, the output is:
+///
+/// ```text
+/// y = W·x + b        i.e.   y_c = b_c + Σ_{j=1..width} W_cj · x_j
+/// ```
+///
+/// During back propagation, given g_c = ∂L/∂y_c, the chain rule gives:
+///
+/// ```text
+/// ∂L/∂W_cj = g_c · x_j          (gradient for each weight)
+/// ∂L/∂b_c  = g_c                (gradient for each bias)
+/// ∂L/∂x_j  = Σ_{c=1..depth} W_cj · g_c   (gradient passed to the previous layer)
+/// ```
+///
+/// These are summed over every training row.  At the end of each epoch, with n rows, learning
+/// rate η, and weight decay λ, gradient descent updates the parameters:
+///
+/// ```text
+/// W_cj ← W_cj − η · ( (Σ ∂L/∂W_cj) / n + λ · W_cj )
+/// b_c  ← b_c  − η · (Σ ∂L/∂b_c) / n
+/// ```
+///
+/// Weights start random in the range ±sqrt(2 / width) (He initialization) and biases start at 0.
+///
+/// In plain algebra:
+/// * Each output is like a line equation y = m·x + b, but with many inputs: multiply each input
+///   by its own weight, add them all up, then add the bias.  Example with weights [0.5, −2] and
+///   bias 1: inputs [4, 1] give 0.5·4 + (−2)·1 + 1 = 1.
+/// * A large positive weight means "this input pushes this output up a lot", a negative weight
+///   means "this input pushes it down", and a weight near 0 means "this input doesn't matter".
+/// * Training asks "if I nudge this weight slightly, does the error go up or down, and by how
+///   much?"  That answer is the gradient.  For a weight it is simply (how wrong the output was)
+///   × (the input that weight multiplied), because the input is what the weight was scaled by.
+/// * Each epoch, every weight takes a small step (sized by the learning rate) in the direction
+///   that lowers the error, using the average gradient over all rows.
+/// * Weight decay also shrinks every weight a little each step, which keeps weights from growing
+///   huge and helps the model generalize instead of memorizing the training data.
+///
+/// # Example uses
+/// * Scoring each iris species from four flower measurements (width 4, depth 3).
+/// * Hidden layers in a deeper network when stacked with an activation layer between them.
+/// * Linear regression, predicting a number such as a house price from its features (depth 1).
+///
+/// Fields:
+/// * weights: The `depth` × `width` matrix; `weights[c][j]` scales input j for output c.
+/// * biases: One constant per output, added after the weighted sum.
+/// * gradient_weights: Running total of weight gradients for the current epoch.  Not serialized.
+/// * gradient_biases: Running total of bias gradients for the current epoch.  Not serialized.
+/// * width: Number of inputs.
+/// * depth: Number of outputs.
+/// * weight_decay: Strength (λ) of the pull toward zero applied to weights each epoch step.
 #[derive(CopyGetters, Getters, Clone, Debug, Serialize, Deserialize)]
 pub struct Weights {
     #[getset(get = "pub")]

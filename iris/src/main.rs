@@ -3,7 +3,7 @@ use std::time::Instant;
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
 
-use crate::{data_set::DataSet, layers::{no_neg::NoNegative, scalars::Scalars, softmax::SoftMax, weights::Weights}, model::Model};
+use crate::{data_set::DataSet, layers::{zero_neg::ZeroNegative, scalars::Scalars, softmax::SoftMax, weights::Weights}, model::Model};
 
 pub mod data_set;
 pub mod layers;
@@ -54,7 +54,7 @@ fn main() -> anyhow::Result<()> {
             let mut model = Model::blank(num_inputs, num_outputs)
                 .add_layer(Scalars::from_fit(&scalars))?
                 .add_layer(Weights::random(num_inputs, 8, 1e-2))?
-                .add_layer(NoNegative::new(8))?
+                .add_layer(ZeroNegative::new(8))?
                 .add_layer(Weights::random(8, num_outputs, 1e-2))?
                 .add_layer(SoftMax::new(num_outputs))?;
             model.train_until_stop_improvement(&train, 0.5, 1e-4, 50)?;
@@ -74,7 +74,19 @@ fn main() -> anyhow::Result<()> {
             std::fs::write(args.model, binary_model)?;
         },
         Mode::Execute => {
-            todo!("Execute")
+            let binary_model = std::fs::read(args.model)?;
+            let model: Model = postcard::from_bytes(&binary_model)?;
+
+            let start_time = Instant::now();
+            let accuracy = model.est_accuracy(&data_set);
+            let duration = start_time.elapsed();
+
+            println!("Accuracy: {:.5}%", accuracy * 100.0);
+            println!(
+                "Took {} ns to run {} predictions or {} ns/prediction",
+                duration.as_nanos(), data_set.len(),
+                duration.as_nanos() / data_set.len() as u128
+            );
         }
     }
 
