@@ -1,81 +1,48 @@
-use anyhow::Context;
-use tutor_core::{designer::ModelDesigner, layers::{scalars::Scalars, softmax::SoftMax, weights::Weights, zero_neg::ZeroNegative}, model::Model};
+use tutor_core::{
+    data::{DataSheet, DataType, Role, Schema},
+    designer::ModelDesigner,
+    layers::{input_schema::InputSchema, output_schema::OutputSchema, weights::Weights, zero_neg::ZeroNegative},
+    model::Model
+};
 
-/// The diagnosis of a tumor in the breast cancer data set.
-///
-/// Variants:
-/// * Benign: Non-cancerous tumor, written as `B` in the csv.
-/// * Malignant: Cancerous tumor, written as `M` in the csv.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(usize)]
-pub enum Diagnosis {
-    Benign = 0,
-    Malignant = 1
-}
-
-/// Number of variants in `Diagnosis`, and so the number of outputs a model needs for this set.
+/// Number of diagnoses, benign (`B`) or malignant (`M`), and so the number of outputs a model
+/// needs for this set.
 pub const NUM_CLASSES: usize = 2;
 
-/// Number of measurement columns that follow the `id` and `diagnosis` columns.
-pub const NUM_FEATURES: usize = 30;
+/// Names of the 30 tumor measurement columns, the mean, standard error, and worst value of ten
+/// cell nucleus measurements.
+const MEASUREMENT_COLUMNS: [&str; 30] = [
+    "radius_mean", "texture_mean", "perimeter_mean", "area_mean", "smoothness_mean",
+    "compactness_mean", "concavity_mean", "concave points_mean", "symmetry_mean",
+    "fractal_dimension_mean",
+    "radius_se", "texture_se", "perimeter_se", "area_se", "smoothness_se",
+    "compactness_se", "concavity_se", "concave points_se", "symmetry_se",
+    "fractal_dimension_se",
+    "radius_worst", "texture_worst", "perimeter_worst", "area_worst", "smoothness_worst",
+    "compactness_worst", "concavity_worst", "concave points_worst", "symmetry_worst",
+    "fractal_dimension_worst"
+];
 
-impl Diagnosis {
-    /// Parses a diagnosis from its csv code.
-    ///
-    /// # Parameters
-    /// * code: The `diagnosis` column value, either `B` or `M`.
-    ///
-    /// # Errors
-    /// * The code is neither `B` nor `M`.
-    pub fn from_code(code: &str) -> anyhow::Result<Self> {
-        match code {
-            "B" => Ok(Diagnosis::Benign),
-            "M" => Ok(Diagnosis::Malignant),
-            other => anyhow::bail!("unknown diagnosis code {other:?}")
-        }
+/// The columns of the breast cancer data sheet: every measurement as a decimal input, and the
+/// `diagnosis` code as an enum output.
+pub(crate) fn schema() -> Schema {
+    let mut schema = Schema::new();
+    for name in MEASUREMENT_COLUMNS {
+        schema.push(name, Role::Input, DataType::Decimal);
     }
+    schema.push("diagnosis", Role::Output, DataType::Enum);
+    return schema;
 }
 
 /// Loads the breast cancer data set from `./breast_cancer.csv`.
 ///
-/// Each row becomes its 30 measurements paired with the index of its `Diagnosis`.  The `id`
-/// column is dropped.  The rows are read by position rather than through serde, as the csv header
-/// has a trailing comma that gives it one more column than the rows.
-///
 /// # Errors
-/// * The csv file cannot be opened or a row cannot be read.
-/// * A row has an unknown diagnosis or a measurement that is not a number.
-/// * A row has fewer than 30 measurements.
-pub(crate) fn load_data() -> anyhow::Result<Vec<(Box<[f32]>, usize)>> {
-    let mut csv_reader = csv::ReaderBuilder::new()
-        .flexible(true)
-        .from_path("./breast_cancer.csv")
-        .context("failed to open ./breast_cancer.csv")?;
-
-    let mut rows = Vec::new();
-    for (line, record) in csv_reader.records().enumerate() {
-        let record = record.with_context(|| format!("failed to read breast_cancer.csv row {line}"))?;
-
-        // column 1 is the diagnosis, columns 2.. are the measurements
-        let diagnosis = Diagnosis::from_code(record.get(1).unwrap_or_default())
-            .with_context(|| format!("bad diagnosis on breast_cancer.csv row {line}"))?;
-        let features = record
-            .iter()
-            .skip(2)
-            .take(NUM_FEATURES)
-            .map(|value| value.parse::<f32>())
-            .collect::<Result<Vec<_>, _>>()
-            .with_context(|| format!("bad measurement on breast_cancer.csv row {line}"))?;
-        anyhow::ensure!(
-            features.len() == NUM_FEATURES,
-            "breast_cancer.csv row {line} has {} measurements, expected {NUM_FEATURES}",
-            features.len()
-        );
-
-        rows.push((features.into_boxed_slice(), diagnosis as usize));
-    }
-
-    Ok(rows)
+/// * The csv file cannot be read.
+/// * A row is missing a column or has a measurement that is not a number.
+pub(crate) fn load_data() -> anyhow::Result<DataSheet> {
+    let csv_content = std::fs::read_to_string("./breast_cancer.csv")?;
+    let data_sheet = DataSheet::from_csv(schema(), &csv_content)?;
+    return Ok(data_sheet);
 }
 
 /// Builds an untrained model shaped for this data set.
@@ -85,20 +52,15 @@ pub(crate) fn load_data() -> anyhow::Result<Vec<(Box<[f32]>, usize)>> {
 /// stopped growing past that width.  Deeper stacks did not help.
 ///
 /// # Parameters
-/// * scalars: Input normalization fitted to the training rows, used as the first layer.
-/// * num_inputs: Number of input features in each row.
 /// * num_outputs: Number of classes the model chooses between.
 ///
 /// # Errors
-/// * `scalars` does not take `num_inputs` inputs, so the layers do not line up.
-pub(crate) fn design_model(
-    num_inputs: usize,
-    num_outputs: usize
-) -> anyhow::Result<ModelDesigner> {
-    Model::designer(num_inputs, num_outputs)
-        .add_layer(Scalars::new())?
+/// * A layer cannot be added to the design.
+pub(crate) fn design_model(num_outputs: usize) -> anyhow::Result<ModelDesigner> {
+    Model::designer()
+        .add_layer(InputSchema::new())?
         .add_layer(Weights::random(32, 1e-2))?
         .add_layer(ZeroNegative)?
         .add_layer(Weights::random(num_outputs, 1e-2))?
-        .add_layer(SoftMax)
+        .add_layer(OutputSchema::new())
 }

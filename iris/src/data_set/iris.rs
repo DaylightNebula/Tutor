@@ -1,5 +1,10 @@
 use serde::Deserialize;
-use tutor_core::{designer::ModelDesigner, layers::{scalars::Scalars, softmax::SoftMax, weights::Weights}, model::Model};
+use tutor_core::{
+    data::{DataSheet, DataType, Role, Schema},
+    designer::ModelDesigner,
+    layers::{input_schema::InputSchema, output_schema::OutputSchema, weights::Weights},
+    model::Model
+};
 
 #[derive(Debug, Deserialize)]
 pub struct Flower {
@@ -29,23 +34,26 @@ impl Flower {
     }
 }
 
-pub(crate) fn load_data() -> anyhow::Result<Vec<(Box<[f32]>, usize)>> {
-    let mut csv_reader = csv::Reader::from_path("./Iris.csv")?;
-    return Ok(
-        csv_reader.deserialize()
-            .collect::<Result<Vec<Flower>, _>>()?
-            .into_iter()
-            .map(|flower| (Box::new(flower.features()) as Box<[f32]>, flower.species as usize))
-            .collect::<Vec<_>>()
-    );
+pub(crate) fn schema() -> Schema {
+    let mut schema = Schema::new();
+    schema.push("SepalLengthCm", Role::Input, DataType::Decimal);
+    schema.push("SepalWidthCm", Role::Input, DataType::Decimal);
+    schema.push("PetalLengthCm", Role::Input, DataType::Decimal);
+    schema.push("PetalWidthCm", Role::Input, DataType::Decimal);
+    schema.push("Species", Role::Output, DataType::Enum);
+    return schema;
 }
 
-pub(crate) fn design_model(
-    num_inputs: usize,
-    num_outputs: usize
-) -> anyhow::Result<ModelDesigner> {
-    Model::designer(num_inputs, num_outputs)
-        .add_layer(Scalars::new())?
+pub(crate) fn load_data() -> anyhow::Result<DataSheet> {
+    let schema = schema();
+    let csv_content = std::fs::read_to_string("./Iris.csv")?;
+    let data_sheet = DataSheet::from_csv(schema, &csv_content)?;
+    return Ok(data_sheet);
+}
+
+pub(crate) fn design_model(num_outputs: usize) -> anyhow::Result<ModelDesigner> {
+    Model::designer()
+        .add_layer(InputSchema::new())?
         .add_layer(Weights::random(num_outputs, 1e-2))?
-        .add_layer(SoftMax)
+        .add_layer(OutputSchema::new())
 }

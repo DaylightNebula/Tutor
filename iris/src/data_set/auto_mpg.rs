@@ -1,6 +1,11 @@
 use anyhow::Context;
 use serde::Deserialize;
-use tutor_core::{designer::ModelDesigner, layers::{scalars::Scalars, softmax::SoftMax, weights::Weights, zero_neg::ZeroNegative}, model::Model};
+use tutor_core::{
+    data::{DataSheet, DataStorage, DataType, Role, Schema},
+    designer::ModelDesigner,
+    layers::{input_schema::InputSchema, output_schema::OutputSchema, weights::Weights, zero_neg::ZeroNegative},
+    model::Model
+};
 
 /// A single car row from the auto mpg data set.
 ///
@@ -79,15 +84,41 @@ impl Car {
     }
 }
 
+/// Names of the input columns, in the same order as `Car::features`.
+const INPUT_COLUMNS: [&str; 7] = [
+    "cylinders",
+    "displacement",
+    "horsepower",
+    "weight",
+    "acceleration",
+    "model year",
+    "origin"
+];
+
+/// Name of the output column holding each car's `MpgClass`.
+const CLASS_COLUMN: &str = "mpg_class";
+
+/// The columns of the auto mpg data sheet: every car spec as a decimal input, and the car's
+/// `MpgClass` as an enum output.
+pub(crate) fn schema() -> Schema {
+    let mut schema = Schema::new();
+    for name in INPUT_COLUMNS {
+        schema.push(name, Role::Input, DataType::Decimal);
+    }
+    schema.push(CLASS_COLUMN, Role::Output, DataType::Enum);
+    return schema;
+}
+
 /// Loads the auto mpg data set from `./auto-mpg.csv`.
 ///
-/// Each row becomes its feature list paired with the index of its `MpgClass`.  Rows that are
-/// missing a horsepower value are skipped.
+/// Each car becomes a sheet row of its specs plus its `MpgClass`.  The class is worked out from
+/// the car's mpg, so the csv is parsed as `Car`s and pushed into the sheet row by row instead of
+/// with `DataSheet::from_csv`.  Rows that are missing a horsepower value are skipped.
 ///
 /// # Errors
 /// * The csv file cannot be opened.
 /// * A row cannot be parsed as a `Car`.
-pub(crate) fn load_data() -> anyhow::Result<Vec<(Box<[f32]>, usize)>> {
+pub(crate) fn load_data() -> anyhow::Result<DataSheet> {
     let mut csv_reader = csv::Reader::from_path("./auto-mpg.csv")
         .context("failed to open ./auto-mpg.csv")?;
 
@@ -96,15 +127,28 @@ pub(crate) fn load_data() -> anyhow::Result<Vec<(Box<[f32]>, usize)>> {
         .deserialize()
         .collect::<Result<Vec<Car>, _>>()
         .context("failed to parse auto-mpg.csv")?;
-    Ok(
-        cars
-            .into_iter()
-            .filter_map(|car| {
-                let features = car.features()?;
-                Some((Box::new(features) as Box<[f32]>, MpgClass::from_mpg(car.mpg) as usize))
+
+    // lay each car out in the sheet's column order
+    let mut sheet = DataSheet::from_schema(schema());
+    for car in cars {
+        let Some(features) = car.features() else { continue };
+        let row = (0 .. sheet.columns().len())
+            .map(|idx| {
+                let name = sheet.column_name(idx)?;
+                if name == CLASS_COLUMN {
+                    return Ok(DataStorage::Enum(format!("{:?}", MpgClass::from_mpg(car.mpg))));
+                }
+                let position = INPUT_COLUMNS
+                    .iter()
+                    .position(|column| *column == name)
+                    .with_context(|| format!("auto mpg schema has an unknown column {name}"))?;
+                Ok(DataStorage::Decimal(features[position]))
             })
-            .collect()
-    )
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        sheet.push(&row)?;
+    }
+
+    Ok(sheet)
 }
 
 /// Builds an untrained model shaped for this data set.
@@ -114,20 +158,15 @@ pub(crate) fn load_data() -> anyhow::Result<Vec<(Box<[f32]>, usize)>> {
 /// layer lowered it.
 ///
 /// # Parameters
-/// * scalars: Input normalization fitted to the training rows, used as the first layer.
-/// * num_inputs: Number of input features in each row.
 /// * num_outputs: Number of classes the model chooses between.
 ///
 /// # Errors
-/// * `scalars` does not take `num_inputs` inputs, so the layers do not line up.
-pub(crate) fn design_model(
-    num_inputs: usize,
-    num_outputs: usize
-) -> anyhow::Result<ModelDesigner> {
-    Model::designer(num_inputs, num_outputs)
-        .add_layer(Scalars::new())?
+/// * A layer cannot be added to the design.
+pub(crate) fn design_model(num_outputs: usize) -> anyhow::Result<ModelDesigner> {
+    Model::designer()
+        .add_layer(InputSchema::new())?
         .add_layer(Weights::random(64, 1e-2))?
         .add_layer(ZeroNegative)?
         .add_layer(Weights::random(num_outputs, 1e-2))?
-        .add_layer(SoftMax)
+        .add_layer(OutputSchema::new())
 }

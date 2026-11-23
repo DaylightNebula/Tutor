@@ -3,9 +3,9 @@
 [x] Swap gradients into an option
 [x] Make the actual weights in a weights layer optional for the untrained format
 [x] Allow I/O numbers to carry through models whenever possible instead of passing through each layer individually
-[ ] Some kind of way to auto extract information from CSV files
-[ ] Initial inputs defined by name and type (will require splitting so enums, ints, decimals, etc can have different amounts of inputs per)
-[ ] Final outputs defiend by name and type (will require splitting so enums, ints, decimals, etc can have different amounts of outputs per)
+[x] Some kind of way to auto extract information from CSV files
+[x] Initial inputs defined by name and type (will require splitting so enums, ints, decimals, etc can have different amounts of inputs per)
+[x] Final outputs defiend by name and type (will require splitting so enums, ints, decimals, etc can have different amounts of outputs per)
 [ ] Auto loader for CSV files so we can scrap having to write a new parser/converter each time
 
 [ ] Investigate: UI designer

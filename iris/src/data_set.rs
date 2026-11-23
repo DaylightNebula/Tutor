@@ -1,5 +1,5 @@
 use clap::ValueEnum;
-use tutor_core::designer::ModelDesigner;
+use tutor_core::{data::DataSheet, designer::ModelDesigner};
 
 pub mod iris;
 pub mod auto_mpg;
@@ -21,13 +21,12 @@ pub enum DataSet {
 
 
 impl DataSet {
-    /// Loads every row of this data set.
-    ///
-    /// Each row is its input features paired with the index of its class.
+    /// Loads every row of this data set into a data sheet, with its features as input columns
+    /// and its class as an output column.
     ///
     /// # Errors
     /// * The data set's csv file cannot be opened or parsed.
-    pub fn load_data(&self) -> anyhow::Result<Vec<(Box<[f32]>, usize)>> {
+    pub fn load_data(&self) -> anyhow::Result<DataSheet> {
         match self {
             DataSet::Iris => iris::load_data(),
             DataSet::AutoMpg => auto_mpg::load_data(),
@@ -37,26 +36,18 @@ impl DataSet {
 
     /// Builds an untrained model shaped for this data set.
     ///
-    /// Each data set has its own layer stack, sized from tuning runs, starting with `scalars` to
-    /// normalize the inputs and ending with a softmax over the classes.
-    ///
-    /// # Parameters
-    /// * scalars: Input normalization fitted to the training rows, used as the first layer.
-    /// * num_inputs: Number of input features in each row.
-    /// * num_outputs: Number of classes the model chooses between.
+    /// Each data set has its own layer stack, sized from tuning runs, starting with an
+    /// `InputSchema` to encode the inputs and ending with an `OutputSchema` over the classes.
+    /// The schemas are fitted to the data when the design is built.
     ///
     /// # Errors
-    /// * `scalars` does not take `num_inputs` inputs, so the layers do not line up.
-    pub fn design_model(
-        &self,
-        num_inputs: usize,
-        num_outputs: usize
-    ) -> anyhow::Result<ModelDesigner> {
-        // todo give scalars a build step so we dont need to pass them through here
+    /// * A layer cannot be added to the design.
+    pub fn design_model(&self) -> anyhow::Result<ModelDesigner> {
+        let num_outputs = self.num_classes();
         match self {
-            DataSet::Iris => iris::design_model(num_inputs, num_outputs),
-            DataSet::AutoMpg => auto_mpg::design_model(num_inputs, num_outputs),
-            DataSet::BreastCancer => breast_cancer::design_model(num_inputs, num_outputs)
+            DataSet::Iris => iris::design_model(num_outputs),
+            DataSet::AutoMpg => auto_mpg::design_model(num_outputs),
+            DataSet::BreastCancer => breast_cancer::design_model(num_outputs)
         }
     }
 

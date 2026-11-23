@@ -2,7 +2,7 @@ use getset::{CopyGetters, Getters};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use crate::layers::Layer;
+use crate::{data::DataSheet, layers::Layer};
 
 /// Weights (fully connected / dense / linear layer)
 ///
@@ -128,7 +128,7 @@ impl Layer for Weights {
     /// left over from a previous training run.
     fn prepare_train(
         &mut self,
-        _sample_data: &[(Box<[f32]>, usize)],
+        _sample_data: &DataSheet,
         input_count: usize
     ) -> anyhow::Result<()> {
         // he initialization scaled to the number of inputs

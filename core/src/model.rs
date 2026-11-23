@@ -1,88 +1,72 @@
 use std::{collections::LinkedList, time::Instant};
 
 use anyhow::Context;
-use getset::{CopyGetters, Getters};
+use getset::Getters;
 use serde::{Deserialize, Serialize};
 
-use crate::{designer::ModelDesigner, layers::Layer};
+use crate::{data::{DataSheet, DataStorage}, designer::ModelDesigner, layers::Layer};
 
-#[derive(Getters, CopyGetters, Serialize, Deserialize)]
+/// A trained or trainable stack of layers that predicts the output columns of a data sheet row
+/// from its input columns.
+///
+/// Fields:
+/// * layers: The layers in the order data flows through them, starting with an `InputSchema` and
+///   ending with an `OutputSchema`.
+#[derive(Getters, Serialize, Deserialize)]
 pub struct Model {
     #[getset(get = "pub")]
-    layers: LinkedList<Box<dyn Layer>>,
-    #[getset(get_copy = "pub")]
-    num_inputs: usize,
-    #[getset(get_copy = "pub")]
-    num_outputs: usize
+    layers: LinkedList<Box<dyn Layer>>
 }
 
 impl Model {
 
     /// Create a new `Model` instance.
-    pub fn new(
-        layers: LinkedList<Box<dyn Layer>>,
-        num_inputs: usize,
-        num_outputs: usize
-    ) -> Self {
-        Self {
-            layers,
-            num_inputs,
-            num_outputs
-        }
+    pub fn new(layers: LinkedList<Box<dyn Layer>>) -> Self {
+        Self { layers }
     }
 
-    /// Create a new `ModelBuilder`.
-    pub fn designer(num_inputs: usize, num_outputs: usize) -> ModelDesigner {
-        ModelDesigner::new(num_inputs, num_outputs)
+    /// Create a new `ModelDesigner`.
+    pub fn designer() -> ModelDesigner {
+        ModelDesigner::new()
     }
 
-    /// Take a piece of row of data and give the probabilities of its outputs.
-    pub fn find_probabilities(&self, inputs: &[f32]) -> anyhow::Result<Box<[f32]>> {
-        let mut results = inputs.to_vec().into_boxed_slice();
+    /// Runs a data sheet row through every layer and gives the final layer's outputs, the
+    /// probability of every option of every output column.
+    pub fn find_probabilities(&self, row: &[DataStorage]) -> anyhow::Result<Box<[f32]>> {
+        let mut results = self.first_layer()?.encode_row(row)?;
         for layer in self.layers.iter() {
             results = layer.transform(&results)?;
         }
         return Ok(results);
     }
 
-    /// Predict which of the <depth> possible options for the given input data
-    /// is most likely.
-    pub fn predict(&self, data: &[f32]) -> anyhow::Result<usize> {
-        let mut best = 0;
-        let probs = self.find_probabilities(data)?;
-
-        for c in 1 .. self.num_outputs {
-            if probs[c] > probs[best] {
-                best = c;
-            }
-        }
-
-        return Ok(best);
+    /// Predicts the value of every output column for a data sheet row.
+    pub fn predict(&self, row: &[DataStorage]) -> anyhow::Result<Vec<(usize, DataStorage)>> {
+        let probabilities = self.find_probabilities(row)?;
+        self.last_layer()?.decode_outputs(&probabilities)
     }
 
-    /// Perform a training epoch from a list of data.  The data should be given a list of inputs
-    /// paired with the index of what should be the index of the highest output.  The average loss
-    /// (miss) is returned at the end of the epoch, useful to see if training is giving better
-    /// results.
-    pub fn train(&mut self, data: &[(Box<[f32]>, usize)], learning_rate: f32) -> anyhow::Result<f32> {
+    /// Perform a training epoch over every row of a data sheet.  The average loss (miss) is
+    /// returned at the end of the epoch, useful to see if training is giving better results.
+    pub fn train(&mut self, data: &DataSheet, learning_rate: f32) -> anyhow::Result<f32> {
         let mut total_loss = 0.0;
-        let n = data.len() as f32;
+        let mut rows = 0;
 
-        for (input, target) in data {
+        for row in data.iter() {
+            rows += 1;
 
             // forward pass, keeping every layer's output; activations[i] is layer i's input
-            let mut activations: Vec<Box<[f32]>> = vec![input.to_vec().into_boxed_slice()];
+            let mut activations: Vec<Box<[f32]>> = vec![self.first_layer()?.encode_row(row)?];
             for (i, layer) in self.layers.iter().enumerate() {
                 let next = layer.transform(&activations[i])?;
                 activations.push(next);
             }
 
-            // cross-entropy loss and its gradient with respect to the final probabilities
-            let probabilities = &activations[self.layers.len()];
-            let p = probabilities[*target] + 1e-7;
-            total_loss += -p.ln();
-            let mut grads = vec![0.0; self.num_outputs].into_boxed_slice();
-            grads[*target] = -1.0 / p;
+            // the last layer scores its outputs against the row's expected values
+            let (loss, mut grads) = self
+                .last_layer()?
+                .output_loss(&activations[self.layers.len()], row)?;
+            total_loss += loss;
 
             // backward pass, each layer handing dLoss/dInput to the one before it
             for (i, layer) in self.layers.iter_mut().enumerate().rev() {
@@ -91,8 +75,10 @@ impl Model {
                     .with_context(|| format!("backward pass failed at layer {i}"))?;
             }
         }
+        anyhow::ensure!(rows > 0, "no rows to train on");
 
         // step every layer's parameters once per epoch
+        let n = rows as f32;
         for layer in &mut self.layers {
             layer.perform_epoch_step(learning_rate, n)?;
         }
@@ -104,7 +90,7 @@ impl Model {
     /// loss for `max_epoch_no_improve` epochs.
     pub fn train_until_stop_improvement(
         &mut self,
-        data: &[(Box<[f32]>, usize)],
+        data: &DataSheet,
         learning_rate: f32,
         min_req_improve: f32,
         max_epoch_no_improve: u32
@@ -115,7 +101,7 @@ impl Model {
         let mut epoch = 0;
 
         loop {
-            let loss = self.train(&data, learning_rate)?;
+            let loss = self.train(data, learning_rate)?;
             epoch += 1;
 
             if loss < best_loss * (1.0 - min_req_improve) {
@@ -126,12 +112,12 @@ impl Model {
             }
 
             if epoch % 100 == 0 {
-                println!("Epoch {epoch}:  Loss {loss:.4}  Accuracy {:.1}%", self.est_accuracy(&data)? * 100.0);
+                println!("Epoch {epoch}:  Loss {loss:.4}  Accuracy {:.1}%", self.est_accuracy(data)? * 100.0);
             }
 
             if epochs_without_improvement >= max_epoch_no_improve {
                 let end = start_time.elapsed();
-                println!("Stopped at epoch {epoch}: loss plateaued at {best_loss:.4}, accuracy {:.2}%, training took {} ms", self.est_accuracy(&data)? * 100.0, end.as_millis());
+                println!("Stopped at epoch {epoch}: loss plateaued at {best_loss:.4}, accuracy {:.2}%, training took {} ms", self.est_accuracy(data)? * 100.0, end.as_millis());
                 break;
             }
         }
@@ -139,16 +125,36 @@ impl Model {
         Ok(())
     }
 
-    /// Use a given list of inputs and expected output pairs, estimate the accuracy of this model
-    /// as a percentage.
-    pub fn est_accuracy(&self, data: &[(Box<[f32]>, usize)]) -> anyhow::Result<f32> {
-        let mut sum = 0;
-        for (x, label) in data.iter() {
-            if self.predict(x)? == *label {
-                sum += 1;
+    /// Estimates the accuracy of this model as the fraction of rows whose output columns are all
+    /// predicted correctly.
+    pub fn est_accuracy(&self, data: &DataSheet) -> anyhow::Result<f32> {
+        let mut correct = 0;
+        let mut rows = 0;
+        for row in data.iter() {
+            rows += 1;
+            let predictions = self.predict(row)?;
+            if predictions.iter().all(|(idx, value)| row.get(*idx) == Some(value)) {
+                correct += 1;
             }
         }
+        anyhow::ensure!(rows > 0, "no rows to estimate accuracy on");
 
-        return Ok(sum as f32 / data.len() as f32);
+        return Ok(correct as f32 / rows as f32);
+    }
+
+    /// The layer that reads data sheet rows.
+    fn first_layer(&self) -> anyhow::Result<&dyn Layer> {
+        self.layers
+            .front()
+            .map(|layer| layer.as_ref())
+            .context("model has no layers")
+    }
+
+    /// The layer that scores and decodes outputs.
+    fn last_layer(&self) -> anyhow::Result<&dyn Layer> {
+        self.layers
+            .back()
+            .map(|layer| layer.as_ref())
+            .context("model has no layers")
     }
 }

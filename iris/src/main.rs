@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
-use tutor_core::{designer::ModelDesigner, model::Model};
+use tutor_core::{data::DataSheet, designer::ModelDesigner, model::Model};
 
 use crate::data_set::DataSet;
 
@@ -32,31 +32,23 @@ fn main() -> anyhow::Result<()> {
 
     match args.mode {
         Mode::Train => {
-            // split flowers into training and test sets
-            let mut flip_flip = false;
-            let (train, test): (Vec<_>, Vec<_>) = data_set
-                .iter()
-                .cloned()
-                .partition(|_| {
-                    flip_flip = !flip_flip;
-                    flip_flip
-                });
+            // split rows alternately into training and test sets
+            let mut train = DataSheet::from_schema(data_set.schema().clone());
+            let mut test = DataSheet::from_schema(data_set.schema().clone());
+            for (i, row) in data_set.iter().enumerate() {
+                if i % 2 == 0 { train.push(row)?; } else { test.push(row)?; }
+            }
 
-            // setup a model sized to the data set and a learning rate
-            let num_inputs = train
-                .first()
-                .context("data set has no rows to train on")?
-                .0
-                .len();
-            let num_outputs = args.data_set.num_classes();
-            let sample_data = train.iter().cloned().collect::<Vec<_>>();
+            // setup a model fitted to the training rows and a learning rate
             let design = args
                 .data_set
-                .design_model(num_inputs, num_outputs)?;
+                .design_model()?;
             let design_str = design.serialize()?;
             let mut model = ModelDesigner::deserialize(&design_str)?
-                .build(&sample_data)?;
+                .build(&train)
+                .context("failed to build the model design")?;
             model.train_until_stop_improvement(&train, 0.5, 1e-4, 50)?;
+            let test_len = test.iter().count();
 
             let start_time = Instant::now();
             let accuracy = model.est_accuracy(&test)?;
@@ -65,8 +57,8 @@ fn main() -> anyhow::Result<()> {
             println!("Final accuracy: {:.5}%", accuracy * 100.0);
             println!(
                 "Took {} ns to run {} predictions or {} ns/prediction",
-                duration.as_nanos(), test.len(),
-                duration.as_nanos() / test.len() as u128
+                duration.as_nanos(), test_len,
+                duration.as_nanos() / test_len as u128
             );
 
             // save the trained model, skipped when no path is given such as for test runs
@@ -84,6 +76,7 @@ fn main() -> anyhow::Result<()> {
                 .with_context(|| format!("failed to read model from {model_path}"))?;
             let model: Model = postcard::from_bytes(&binary_model)?;
 
+            let data_len = data_set.iter().count();
             let start_time = Instant::now();
             let accuracy = model.est_accuracy(&data_set)?;
             let duration = start_time.elapsed();
@@ -91,8 +84,8 @@ fn main() -> anyhow::Result<()> {
             println!("Accuracy: {:.5}%", accuracy * 100.0);
             println!(
                 "Took {} ns to run {} predictions or {} ns/prediction",
-                duration.as_nanos(), data_set.len(),
-                duration.as_nanos() / data_set.len() as u128
+                duration.as_nanos(), data_len,
+                duration.as_nanos() / data_len as u128
             );
         }
     }

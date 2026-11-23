@@ -1,7 +1,7 @@
 use getset::CopyGetters;
 use serde::{Deserialize, Serialize};
 
-use crate::layers::Layer;
+use crate::{data::DataSheet, layers::Layer};
 
 /// ZeroNegative (ReLU activation layer)
 ///
@@ -57,7 +57,7 @@ impl Layer for ZeroNegative {
 
     fn output_size(&self, input_count: usize) -> usize { input_count }
 
-    fn prepare_train(&mut self, _sample_data: &[(Box<[f32]>, usize)], _input_count: usize) -> anyhow::Result<()> {
+    fn prepare_train(&mut self, _sample_data: &DataSheet, _input_count: usize) -> anyhow::Result<()> {
         Ok(())
     }
 
