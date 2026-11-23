@@ -42,7 +42,7 @@ fn main() -> anyhow::Result<()> {
             // setup a model fitted to the training rows and a learning rate
             let design = args
                 .data_set
-                .design_model()?;
+                .design_model(&train)?;
             let design_str = design.serialize()?;
             let mut model = ModelDesigner::deserialize(&design_str)?
                 .build(&train)
