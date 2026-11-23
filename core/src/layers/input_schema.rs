@@ -1,5 +1,6 @@
 use anyhow::Context;
 use getset::{CopyGetters, Getters};
+use ndarray::{Array2, ArrayView2};
 use serde::{Deserialize, Serialize};
 
 use crate::{data::{DataConverter, DataSheet, DataStorage}, layers::Layer};
@@ -78,37 +79,53 @@ impl Layer for InputSchema {
     }
 
     /// Passes the already encoded inputs through unchanged.
-    fn transform(&self, inputs: &[f32]) -> anyhow::Result<Box<[f32]>> {
-        Ok(inputs.into())
+    fn transform(&self, inputs: ArrayView2<f32>) -> anyhow::Result<Array2<f32>> {
+        Ok(inputs.to_owned())
     }
 
     /// Passes the gradients back unchanged, nothing in this layer is learned.
     fn back_propagate(
         &mut self,
-        _inputs: &[f32],
-        _outputs: &[f32],
-        output_gradient: &[f32]
-    ) -> anyhow::Result<Box<[f32]>> {
-        Ok(output_gradient.into())
+        _inputs: ArrayView2<f32>,
+        _outputs: ArrayView2<f32>,
+        output_gradient: ArrayView2<f32>
+    ) -> anyhow::Result<Array2<f32>> {
+        Ok(output_gradient.to_owned())
     }
 
-    /// Encodes every input column of `row` and joins them in column index order.
-    fn encode_row(&self, row: &[DataStorage]) -> anyhow::Result<Box<[f32]>> {
+    /// Encodes every input column of each row, joined in column index order, into one batch row
+    /// per data sheet row.
+    fn encode_inputs(&self, rows: &[&[DataStorage]]) -> anyhow::Result<Array2<f32>> {
         let Some(columns) = &self.columns else { anyhow::bail!("InputSchema layer not prepared") };
+        encode_columns(columns, rows, "input")
+    }
+}
 
-        let count = columns.iter()
-            .map(|column| column.converter.num_weights())
-            .sum();
-        let mut encoded = Vec::with_capacity(count);
+/// Encodes the given columns of every row into one flat batch, one batch row per data sheet row
+/// with the columns joined in order.  Shared by the input and output schemas.
+pub(crate) fn encode_columns(
+    columns: &[SchemaColumn],
+    rows: &[&[DataStorage]],
+    kind: &str
+) -> anyhow::Result<Array2<f32>> {
+    let width = columns
+        .iter()
+        .map(|column| column.converter.num_weights())
+        .sum::<usize>();
+
+    // encode every row back to back into one flat buffer
+    let mut encoded = Vec::with_capacity(width * rows.len());
+    for row in rows {
         for column in columns {
             let value = row
                 .get(column.index)
-                .with_context(|| format!("row has no value for input column {}", column.name))?;
+                .with_context(|| format!("row has no value for {kind} column {}", column.name))?;
             column.converter
                 .encode(value, &mut encoded)
-                .with_context(|| format!("failed to encode input column {}", column.name))?;
+                .with_context(|| format!("failed to encode {kind} column {}", column.name))?;
         }
-
-        Ok(encoded.into_boxed_slice())
     }
+
+    Array2::from_shape_vec((rows.len(), width), encoded)
+        .with_context(|| format!("encoded {kind} columns did not fill a {} × {width} batch", rows.len()))
 }

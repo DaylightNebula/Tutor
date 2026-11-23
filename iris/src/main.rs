@@ -47,7 +47,7 @@ fn main() -> anyhow::Result<()> {
             let mut model = ModelDesigner::deserialize(&design_str)?
                 .build(&train)
                 .context("failed to build the model design")?;
-            model.train_until_stop_improvement(&train, 0.5, 1e-4, 50)?;
+            model.train_until_stop_improvement(&train, 0.05, 32, 1e-4, 50)?;
             let test_len = test.iter().count();
 
             let start_time = Instant::now();

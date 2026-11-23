@@ -1,10 +1,11 @@
 use anyhow::Context;
 use getset::Getters;
+use ndarray::{Array2, ArrayView1, ArrayView2, Axis, Zip, s};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     data::{DataConverter, DataSheet, DataStorage},
-    layers::{Layer, input_schema::SchemaColumn}
+    layers::{Layer, input_schema::{SchemaColumn, encode_columns}}
 };
 
 /// Turns the raw scores of the layer before it into one probability per option of every output
@@ -79,93 +80,149 @@ impl Layer for OutputSchema {
         Ok(())
     }
 
-    /// Applies a softmax to the scores of each output column.
-    fn transform(&self, scores: &[f32]) -> anyhow::Result<Box<[f32]>> {
-        let mut probabilities = vec![0.0; scores.len()];
+    /// Applies a softmax to the scores of each output column of every row.
+    fn transform(&self, scores: ArrayView2<f32>) -> anyhow::Result<Array2<f32>> {
+        let mut probabilities = scores.to_owned();
         for (_, _, range) in self.column_slices()? {
-            let column_scores = &scores[range.clone()];
-            let max = column_scores
-                .iter()
-                .copied()
-                .fold(f32::NEG_INFINITY, f32::max);
+            anyhow::ensure!(
+                range.end <= scores.ncols(),
+                "OutputSchema expected at least {} scores per row but got {}", range.end, scores.ncols()
+            );
 
-            // exponentiate then divide by the column's total
-            let exps = column_scores
-                .iter()
-                .map(|score| (score - max).exp())
-                .collect::<Vec<_>>();
-            let sum = exps.iter().sum::<f32>();
-            for (probability, exp) in probabilities[range].iter_mut().zip(exps) {
-                *probability = exp / sum;
+            // exponentiate then divide by the column's total, row by row
+            let mut column_scores = probabilities.slice_mut(s![.., range]);
+            for mut row in column_scores.rows_mut() {
+                let max = row.fold(f32::NEG_INFINITY, |max, &score| max.max(score));
+                row.mapv_inplace(|score| (score - max).exp());
+                let sum = row.sum();
+                row.mapv_inplace(|exp| exp / sum);
             }
         }
 
-        Ok(probabilities.into_boxed_slice())
+        Ok(probabilities)
     }
 
     /// Passes the gradients back through each column's softmax.
     fn back_propagate(
         &mut self,
-        _inputs: &[f32],
-        outputs: &[f32],
-        output_gradient: &[f32]
-    ) -> anyhow::Result<Box<[f32]>> {
-        let mut input_grads = vec![0.0; outputs.len()];
-        for (_, _, range) in self.column_slices()? {
-            let column_outputs = &outputs[range.clone()];
-            let column_grads = &output_gradient[range.clone()];
+        _inputs: ArrayView2<f32>,
+        outputs: ArrayView2<f32>,
+        output_gradient: ArrayView2<f32>
+    ) -> anyhow::Result<Array2<f32>> {
+        anyhow::ensure!(
+            outputs.dim() == output_gradient.dim(),
+            "OutputSchema got {:?} outputs but {:?} gradients", outputs.dim(), output_gradient.dim()
+        );
 
-            // Σ g·y appears in every input's gradient, so compute it once
-            let dot = column_grads
-                .iter()
-                .zip(column_outputs)
-                .map(|(g, y)| g * y)
-                .sum::<f32>();
+        let mut input_grads = Array2::zeros(outputs.raw_dim());
+        for (_, _, range) in self.column_slices()? {
+            let column_outputs = outputs.slice(s![.., range.clone()]);
+            let column_grads = output_gradient.slice(s![.., range.clone()]);
+
+            // Σ g·y appears in every input's gradient, so compute it once per row
+            let dots = (&column_grads * &column_outputs)
+                .sum_axis(Axis(1))
+                .insert_axis(Axis(1));
 
             // dL/dz_i = y_i · (g_i − Σ g·y)
-            for ((input_grad, y), g) in input_grads[range].iter_mut().zip(column_outputs).zip(column_grads) {
-                *input_grad = y * (g - dot);
-            }
+            input_grads
+                .slice_mut(s![.., range])
+                .assign(&(&column_outputs * &(&column_grads - &dots)));
         }
 
-        Ok(input_grads.into_boxed_slice())
+        Ok(input_grads)
+    }
+
+    /// One-hot encodes the expected option of every output column of each row.
+    fn encode_targets(&self, rows: &[&[DataStorage]]) -> anyhow::Result<Array2<f32>> {
+        let Some(columns) = &self.columns else { anyhow::bail!("OutputSchema layer not prepared") };
+        encode_columns(columns, rows, "output")
     }
 
     /// Cross-entropy of each output column's probabilities against the row's option, summed over
-    /// the columns, with its gradient.
-    fn output_loss(&self, outputs: &[f32], row: &[DataStorage]) -> anyhow::Result<(f32, Box<[f32]>)> {
+    /// the columns and rows, with its gradient.
+    fn output_loss(
+        &self,
+        outputs: ArrayView2<f32>,
+        targets: ArrayView2<f32>
+    ) -> anyhow::Result<(f32, Array2<f32>)> {
+        anyhow::ensure!(
+            outputs.dim() == targets.dim(),
+            "OutputSchema got {:?} outputs but {:?} targets", outputs.dim(), targets.dim()
+        );
+
+        // only the expected option of each column scores, the one-hot target picks it out
         let mut loss = 0.0;
-        let mut grads = vec![0.0; outputs.len()];
-        for (column, _, range) in self.column_slices()? {
-            let Some(DataStorage::Enum(expected)) = row.get(column.index()) else {
-                anyhow::bail!("row has no enum value for output column {}", column.name())
-            };
-            let target = range.start + column.converter()
-                .option_index(expected)
-                .with_context(|| format!("unknown option in output column {}", column.name()))?;
+        let mut grads = Array2::zeros(outputs.raw_dim());
+        Zip::from(&mut grads)
+            .and(&outputs)
+            .and(&targets)
+            .for_each(|grad, &output, &target| {
+                if target > 0.0 {
+                    // the small offset keeps ln(0) from giving an infinite loss
+                    let p = output + 1e-7;
+                    loss += -p.ln();
+                    *grad = -1.0 / p;
+                }
+            });
 
-            // the small offset keeps ln(0) from giving an infinite loss
-            let p = outputs[target] + 1e-7;
-            loss += -p.ln();
-            grads[target] = -1.0 / p;
-        }
-
-        Ok((loss, grads.into_boxed_slice()))
+        Ok((loss, grads))
     }
 
-    /// Picks the most likely option of each output column.
-    fn decode_outputs(&self, outputs: &[f32]) -> anyhow::Result<Vec<(usize, DataStorage)>> {
-        self.column_slices()?
+    /// Counts the rows where the most likely option of every output column is the expected one.
+    fn count_correct(
+        &self,
+        outputs: ArrayView2<f32>,
+        targets: ArrayView2<f32>
+    ) -> anyhow::Result<usize> {
+        anyhow::ensure!(
+            outputs.dim() == targets.dim(),
+            "OutputSchema got {:?} outputs but {:?} targets", outputs.dim(), targets.dim()
+        );
+
+        let slices = self.column_slices()?;
+        let mut correct = 0;
+        for (output_row, target_row) in outputs.rows().into_iter().zip(targets.rows()) {
+            let all_match = slices
+                .iter()
+                .all(|(_, _, range)| {
+                    best_option(output_row.slice(s![range.clone()])) == best_option(target_row.slice(s![range.clone()]))
+                });
+            if all_match { correct += 1; }
+        }
+
+        Ok(correct)
+    }
+
+    /// Picks the most likely option of each output column of every row.
+    fn decode_outputs(&self, outputs: ArrayView2<f32>) -> anyhow::Result<Vec<Vec<(usize, DataStorage)>>> {
+        let slices = self.column_slices()?;
+        outputs
+            .rows()
             .into_iter()
-            .map(|(column, options, range)| {
-                let best = outputs[range]
+            .map(|row| {
+                slices
                     .iter()
-                    .enumerate()
-                    .max_by(|a, b| a.1.total_cmp(b.1))
-                    .map(|(i, _)| i)
-                    .with_context(|| format!("output column {} has no options", column.name()))?;
-                Ok((column.index(), DataStorage::Enum(options[best].clone())))
+                    .map(|(column, options, range)| {
+                        anyhow::ensure!(
+                            range.end <= row.len(),
+                            "OutputSchema expected at least {} outputs per row but got {}", range.end, row.len()
+                        );
+                        let best = best_option(row.slice(s![range.clone()]))
+                            .with_context(|| format!("output column {} has no options", column.name()))?;
+                        Ok((column.index(), DataStorage::Enum(options[best].clone())))
+                    })
+                    .collect()
             })
             .collect()
     }
+}
+
+/// Index of the highest value in one column's scores, `None` if the column has no options.
+fn best_option(scores: ArrayView1<f32>) -> Option<usize> {
+    scores
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .map(|(i, _)| i)
 }

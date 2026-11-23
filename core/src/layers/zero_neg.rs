@@ -1,4 +1,5 @@
 use getset::CopyGetters;
+use ndarray::{Array2, ArrayView2, Zip};
 use serde::{Deserialize, Serialize};
 
 use crate::{data::DataSheet, layers::Layer};
@@ -61,23 +62,28 @@ impl Layer for ZeroNegative {
         Ok(())
     }
 
-    fn transform(&self, inputs: &[f32]) -> anyhow::Result<Box<[f32]>> {
-        return Ok(inputs.iter().map(|x| x.max(0.0)).collect());
+    fn transform(&self, inputs: ArrayView2<f32>) -> anyhow::Result<Array2<f32>> {
+        Ok(inputs.mapv(|x| x.max(0.0)))
     }
 
     /// Apply the same rule as transform by zipping inputs with gradients to
     /// effectively reverse this layer.
     fn back_propagate(
         &mut self,
-        inputs: &[f32],
-        _outputs: &[f32],
-        output_gradient: &[f32]
-    ) -> anyhow::Result<Box<[f32]>> {
-        Ok(
-            inputs.iter()
-                .zip(output_gradient)
-                .map(|(x, g)| if *x > 0.0 { *g } else { 0.0 })
-                .collect()
-        )
+        inputs: ArrayView2<f32>,
+        _outputs: ArrayView2<f32>,
+        output_gradient: ArrayView2<f32>
+    ) -> anyhow::Result<Array2<f32>> {
+        anyhow::ensure!(
+            inputs.dim() == output_gradient.dim(),
+            "ZeroNegative got {:?} inputs but {:?} gradients", inputs.dim(), output_gradient.dim()
+        );
+
+        // only rows whose input was positive pass their gradient back
+        let mut input_gradient = output_gradient.to_owned();
+        Zip::from(&mut input_gradient)
+            .and(&inputs)
+            .for_each(|gradient, &x| if x <= 0.0 { *gradient = 0.0 });
+        Ok(input_gradient)
     }
 }
