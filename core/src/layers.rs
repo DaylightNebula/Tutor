@@ -5,7 +5,7 @@ pub mod zero_neg;
 
 use ndarray::{Array2, ArrayView2};
 
-use crate::data::{DataSheet, DataStorage};
+use crate::{data::{DataSheet, DataStorage}, model::ColumnScore};
 
 /// Layers are simply something that takes x inputs and turns them into y outputs.
 /// These may be anything from an output schema for probability outputs, predict via weights,
@@ -15,8 +15,8 @@ use crate::data::{DataSheet, DataStorage};
 /// column per input or output of the layer.
 ///
 /// A model's first layer reads data sheet rows through `encode_inputs`, and its last layer
-/// encodes, scores, and reads back outputs through `encode_targets`, `output_loss`,
-/// `count_correct`, and `decode_outputs`.  Only the [`InputSchema`](input_schema::InputSchema)
+/// encodes, scores, and reads back outputs through `encode_targets`, `output_loss`, `evaluate`,
+/// and `decode_outputs`.  Only the [`InputSchema`](input_schema::InputSchema)
 /// and [`OutputSchema`](output_schema::OutputSchema) layers implement those, every other layer
 /// keeps the default that returns an error.
 #[typetag::serde(tag = "type")]
@@ -73,8 +73,10 @@ pub trait Layer {
     }
 
     /// Scores a batch of this layer's `outputs` against `targets` from `encode_targets`,
-    /// returning the loss summed over every row and dLoss/dOutput for each row.  Called on a
-    /// model's last layer during training.
+    /// returning the loss summed over every row and the gradient for each row that is handed to
+    /// this layer's `back_propagate`.  That is usually dLoss/dOutput, but a layer may fold its own
+    /// derivative in, as [`OutputSchema`](output_schema::OutputSchema) does.  Called on a model's
+    /// last layer during training.
     fn output_loss(
         &self,
         _outputs: ArrayView2<f32>,
@@ -83,13 +85,14 @@ pub trait Layer {
         anyhow::bail!("this layer cannot score outputs, a model must end with an OutputSchema layer")
     }
 
-    /// Counts the rows of a batch of this layer's `outputs` whose every predicted value matches
-    /// `targets` from `encode_targets`.  Called on a model's last layer to measure accuracy.
-    fn count_correct(
+    /// Scores how well a batch of this layer's `outputs` predicts `targets` from
+    /// `encode_targets`, one score per output column.  Called on a model's last layer to measure
+    /// accuracy.
+    fn evaluate(
         &self,
         _outputs: ArrayView2<f32>,
         _targets: ArrayView2<f32>
-    ) -> anyhow::Result<usize> {
+    ) -> anyhow::Result<Vec<ColumnScore>> {
         anyhow::bail!("this layer cannot score outputs, a model must end with an OutputSchema layer")
     }
 

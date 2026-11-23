@@ -11,7 +11,6 @@ use tutor_core::{
 /// the census rather than a detail of the person.
 pub(crate) fn schema() -> Schema {
     let mut schema = Schema::new();
-    schema.push("age", Role::Input, DataType::Integer);
     schema.push("workclass", Role::Input, DataType::Enum);
     schema.push("education", Role::Input, DataType::Enum);
     schema.push("education.num", Role::Input, DataType::Integer);
@@ -25,6 +24,7 @@ pub(crate) fn schema() -> Schema {
     schema.push("hours.per.week", Role::Input, DataType::Integer);
     schema.push("native.country", Role::Input, DataType::Enum);
     schema.push("income", Role::Output, DataType::Enum);
+    schema.push("age", Role::Output, DataType::Integer);
     return schema;
 }
 
@@ -61,8 +61,8 @@ pub(crate) fn load_data() -> anyhow::Result<DataSheet> {
 pub(crate) fn design_model(num_outputs: usize) -> anyhow::Result<ModelDesigner> {
     Model::designer()
         .add_layer(InputSchema::new())?
-        .add_layer(Weights::random(32, 1e-2))?
+        .add_layer(Weights::random(64, 3e-3))?
         .add_layer(ZeroNegative)?
-        .add_layer(Weights::random(num_outputs, 1e-2))?
+        .add_layer(Weights::random(num_outputs, 3e-3))?
         .add_layer(OutputSchema::new())
 }

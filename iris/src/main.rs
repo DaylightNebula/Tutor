@@ -51,10 +51,10 @@ fn main() -> anyhow::Result<()> {
             let test_len = test.iter().count();
 
             let start_time = Instant::now();
-            let accuracy = model.est_accuracy(&test)?;
+            let evaluation = model.evaluate(&test)?;
             let duration = start_time.elapsed();
 
-            println!("Final accuracy: {:.5}%", accuracy * 100.0);
+            println!("Final scores: {evaluation}");
             println!(
                 "Took {} ns to run {} predictions or {} ns/prediction",
                 duration.as_nanos(), test_len,
@@ -78,10 +78,10 @@ fn main() -> anyhow::Result<()> {
 
             let data_len = data_set.iter().count();
             let start_time = Instant::now();
-            let accuracy = model.est_accuracy(&data_set)?;
+            let evaluation = model.evaluate(&data_set)?;
             let duration = start_time.elapsed();
 
-            println!("Accuracy: {:.5}%", accuracy * 100.0);
+            println!("Scores: {evaluation}");
             println!(
                 "Took {} ns to run {} predictions or {} ns/prediction",
                 duration.as_nanos(), data_len,

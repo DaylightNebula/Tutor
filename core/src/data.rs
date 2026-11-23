@@ -80,6 +80,41 @@ impl DataConverter {
         Ok(())
     }
 
+    /// Reads the model weights of one value, as written by `encode`, back into a value.  Enum
+    /// weights give their highest scoring option, and numeric weights are scaled back to the
+    /// column's units, with integers rounded to the nearest whole number.
+    pub fn decode(&self, encoded: &[f32]) -> anyhow::Result<DataStorage> {
+        anyhow::ensure!(
+            encoded.len() == self.num_weights(),
+            "{self:?} expects {} weights to decode but got {}", self.num_weights(), encoded.len()
+        );
+
+        match self {
+            Self::Decimal { .. } => Ok(DataStorage::Decimal(self.denormalize(encoded[0])?)),
+            Self::Integer { .. } => Ok(DataStorage::Integer(self.denormalize(encoded[0])?.round() as i32)),
+            Self::Enum { options } => {
+                let best = encoded
+                    .iter()
+                    .enumerate()
+                    .max_by(|a, b| a.1.total_cmp(b.1))
+                    .map(|(i, _)| i)
+                    .context("enum converter has no options to decode")?;
+                Ok(DataStorage::Enum(options[best].clone()))
+            }
+        }
+    }
+
+    /// Scales a normalized number from `encode` back to the column's units, without rounding.
+    /// Enum converters have no units, so they give an error.
+    pub fn denormalize(&self, normalized: f32) -> anyhow::Result<f32> {
+        match self {
+            Self::Decimal { mean, standard_deviation } | Self::Integer { mean, standard_deviation } => {
+                Ok(normalized * standard_deviation + mean)
+            },
+            Self::Enum { .. } => anyhow::bail!("{self:?} is not a numeric converter")
+        }
+    }
+
     /// Position of `option` in this enum converter's options.
     pub fn option_index(&self, option: &str) -> anyhow::Result<usize> {
         let Self::Enum { options } = self else { anyhow::bail!("{self:?} is not an enum converter") };

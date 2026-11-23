@@ -1,4 +1,4 @@
-use std::{collections::LinkedList, time::Instant};
+use std::{collections::LinkedList, fmt, time::Instant};
 
 use anyhow::Context;
 use getset::Getters;
@@ -24,6 +24,40 @@ pub struct EncodedSheet {
     inputs: Array2<f32>,
     #[getset(get = "pub")]
     targets: Array2<f32>
+}
+
+/// How well a model predicts one output column: the fraction of rows predicted correctly for an
+/// enum column, or the mean absolute error in the column's units for a decimal or integer column.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ColumnScore {
+    Accuracy { column: String, accuracy: f32 },
+    MeanAbsoluteError { column: String, error: f32 }
+}
+
+impl fmt::Display for ColumnScore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Accuracy { column, accuracy } => write!(f, "{column} accuracy {:.2}%", accuracy * 100.0),
+            Self::MeanAbsoluteError { column, error } => write!(f, "{column} mean absolute error {error:.3}")
+        }
+    }
+}
+
+/// The scores of every output column of a model over a set of rows, from `Model::evaluate`.
+#[derive(Getters, Clone, Debug, PartialEq)]
+pub struct Evaluation {
+    #[getset(get = "pub")]
+    columns: Vec<ColumnScore>
+}
+
+impl fmt::Display for Evaluation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, score) in self.columns.iter().enumerate() {
+            if i > 0 { write!(f, ", ")?; }
+            write!(f, "{score}")?;
+        }
+        Ok(())
+    }
 }
 
 impl Model {
@@ -53,7 +87,8 @@ impl Model {
     }
 
     /// Runs a data sheet row through every layer and gives the final layer's outputs, the
-    /// probability of every option of every output column.
+    /// probability of every option of every enum output column and the normalized value of every
+    /// numeric one.
     pub fn find_probabilities(&self, row: &[DataStorage]) -> anyhow::Result<Box<[f32]>> {
         let inputs = self.first_layer()?.encode_inputs(&[row])?;
         let probabilities = self.run(inputs.view())?;
@@ -179,12 +214,12 @@ impl Model {
             }
 
             if epoch % 100 == 0 {
-                println!("Epoch {epoch}:  Loss {loss:.4}  Accuracy {:.1}%", self.est_accuracy_encoded(&encoded)? * 100.0);
+                println!("Epoch {epoch}:  Loss {loss:.4}  {}", self.evaluate_encoded(&encoded)?);
             }
 
             if epochs_without_improvement >= max_epoch_no_improve {
                 let end = start_time.elapsed();
-                println!("Stopped at epoch {epoch}: loss plateaued at {best_loss:.4}, accuracy {:.2}%, training took {} ms", self.est_accuracy_encoded(&encoded)? * 100.0, end.as_millis());
+                println!("Stopped at epoch {epoch}: loss plateaued at {best_loss:.4}, {}, training took {} ms", self.evaluate_encoded(&encoded)?, end.as_millis());
                 break;
             }
         }
@@ -192,25 +227,24 @@ impl Model {
         Ok(())
     }
 
-    /// Estimates the accuracy of this model as the fraction of rows whose output columns are all
-    /// predicted correctly.
-    pub fn est_accuracy(&self, data: &DataSheet) -> anyhow::Result<f32> {
+    /// Scores how well this model predicts each output column of a data sheet's rows, see
+    /// `ColumnScore`.
+    pub fn evaluate(&self, data: &DataSheet) -> anyhow::Result<Evaluation> {
         let encoded = self.encode(data)?;
-        self.est_accuracy_encoded(&encoded)
+        self.evaluate_encoded(&encoded)
     }
 
-    /// Estimates the accuracy of this model over an encoded data sheet as the fraction of rows
-    /// whose output columns are all predicted correctly.
-    pub fn est_accuracy_encoded(&self, data: &EncodedSheet) -> anyhow::Result<f32> {
-        let rows = data.inputs.nrows();
-        anyhow::ensure!(rows > 0, "no rows to estimate accuracy on");
+    /// Scores how well this model predicts each output column of an encoded data sheet's rows,
+    /// see `ColumnScore`.
+    pub fn evaluate_encoded(&self, data: &EncodedSheet) -> anyhow::Result<Evaluation> {
+        anyhow::ensure!(data.inputs.nrows() > 0, "no rows to evaluate");
 
-        let probabilities = self.run(data.inputs.view())?;
-        let correct = self
+        let outputs = self.run(data.inputs.view())?;
+        let columns = self
             .last_layer()?
-            .count_correct(probabilities.view(), data.targets.view())?;
+            .evaluate(outputs.view(), data.targets.view())?;
 
-        return Ok(correct as f32 / rows as f32);
+        Ok(Evaluation { columns })
     }
 
     /// Runs a batch of encoded inputs through every layer and gives the last layer's outputs.
