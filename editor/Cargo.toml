@@ -1,0 +1,25 @@
+[package]
+name = "tutor-editor"
+description = "An editor for models built for models of the tutor statistical model framework."
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+gearbox = { path = "../../gearbox" }
+tutor-core = { path = "../core" }
+deltos = { path = "../../Deltos/core" }
+deltos-node-graphs = { path = "../../Deltos/node-graphs" }
+
+clap = { version = "4.6.8", features = ["derive"] }
+ndarray = "0.16"
+ndarray-rand = "0.15"
+rand = "0.8"
+csv = "1"
+serde = { version = "1", features = ["derive"] }
+linfa = "0.8"
+linfa-logistic = "0.8"
+anyhow = "1.0.104"
+getset = "0.1.7"
+typetag = "0.2.23"
+postcard = { version = "1.1.3", features = ["alloc"] }
+uuid = "1.29.3"
