@@ -15,7 +15,7 @@ impl Plugin for ModelEditorPlugin {
     fn build(self, app: App) -> App {
         app .add_plugin(DeltosNodeGraphPlugin)
             .on_startup(|mut editor: ResMut<DeltosEditor>| {
-                let graph_editor = NodeGraphFileEditor::new(ModelEditor::default(), editor.font.clone());
+                let graph_editor = NodeGraphFileEditor::new(ModelEditor::default());
                 editor.add_editor(Box::new(graph_editor), false);
             })
     }

@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use deltos::theme::Theme;
-use deltos_node_graphs::tiles::{IOButton, NodeGraphTile, TileProperty, Wire, WireRules, Wires};
-use gearbox::{anyhow::{self, Context}, glam::{Vec2, Vec4}};
+use deltos_node_graphs::{editor::property_field, tiles::{IOButton, NodeGraphTile, Wire, WireRules, Wires}};
+use gearbox::{anyhow::{self, Context}, glam::{Vec2, Vec4}, ui::{Node, SDFFont, UiBundle, px}};
 use serde_json::Value;
 use tutor_core::layers::Layer;
 use uuid::Uuid;
@@ -112,6 +114,19 @@ impl LayerTile {
             .filter(|(name, value)| name != "type" && (value.is_number() || value.is_string() || value.is_boolean()))
             .collect())
     }
+
+    /// The layer's editable settings as (name, value) text pairs, in name order.  A layer that
+    /// can't be written has none, so its tile still draws.
+    fn property_values(&self) -> Vec<(String, String)> {
+        let Ok(fields) = self.editable_fields() else { return Vec::new() };
+        fields
+            .into_iter()
+            .map(|(name, value)| match value {
+                Value::String(text) => (name, text),
+                other => (name, other.to_string())
+            })
+            .collect()
+    }
 }
 
 impl NodeGraphTile for LayerTile {
@@ -167,16 +182,14 @@ impl NodeGraphTile for LayerTile {
         vec![(IOButton::new(OUTPUT, "Out", theme.purple, WireRules::Multi), Wires::new(self.wires.clone()))]
     }
 
-    fn properties(&self) -> Vec<TileProperty> {
-        // a layer that can't be written shows no properties instead of failing to draw
-        let Ok(fields) = self.editable_fields() else { return Vec::new() };
-        fields
+    fn body(&self, theme: &Theme, font: &Arc<SDFFont>) -> Option<UiBundle> {
+        let fields = self
+            .property_values()
             .into_iter()
-            .map(|(name, value)| match value {
-                Value::String(text) => TileProperty::new(name, text),
-                other => TileProperty::new(name, other.to_string())
-            })
-            .collect()
+            .map(|(name, value)| property_field(theme, font, self.tile_id, &name, &value))
+            .collect::<Vec<_>>();
+        if fields.is_empty() { return None }
+        Some(UiBundle::new(Node::column().gap(px(6.0))).children(fields))
     }
 
     fn set_property(&mut self, name: &str, value: &str) -> anyhow::Result<()> {
@@ -214,7 +227,7 @@ impl NodeGraphTile for LayerTile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutor_core::layers::{input_schema::InputSchema, output_schema::OutputSchema, weights::Weights};
+    use tutor_core::layers::{input_schema::InputSchema, output_schema::OutputSchema, weights::Weights, zero_neg::ZeroNegative};
 
     /// A weights tile with 2 outputs and no weight decay.
     fn weights_tile() -> anyhow::Result<LayerTile> {
@@ -224,10 +237,10 @@ mod tests {
     /// The value shown for the property `name` of `tile`.
     fn property(tile: &LayerTile, name: &str) -> Option<String> {
         tile
-            .properties()
+            .property_values()
             .into_iter()
-            .find(|property| property.name() == name)
-            .map(|property| property.value().clone())
+            .find(|(property, _)| property == name)
+            .map(|(_, value)| value)
     }
 
     #[test]
@@ -282,12 +295,23 @@ mod tests {
         let tile = weights_tile()?;
 
         let names = tile
-            .properties()
+            .property_values()
             .into_iter()
-            .map(|property| property.name().clone())
+            .map(|(name, _)| name)
             .collect::<Vec<_>>();
         assert_eq!(names, ["depth", "weight_decay"]);
         assert_eq!(property(&tile, "depth").as_deref(), Some("2"));
+        Ok(())
+    }
+
+    #[test]
+    fn only_layers_with_settings_get_a_body() -> anyhow::Result<()> {
+        let theme = Theme::default();
+        let font = Arc::new(SDFFont::new(include_bytes!("../../../Deltos/core/fonts/BlexMonoNerdFontMono-Regular.ttf"))?);
+        let zero_neg = LayerTile::new(Uuid::new_v4(), Box::new(ZeroNegative), Vec2::ZERO, 0)?;
+
+        assert!(weights_tile()?.body(&theme, &font).is_some());
+        assert!(zero_neg.body(&theme, &font).is_none());
         Ok(())
     }
 
