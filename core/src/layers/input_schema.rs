@@ -7,9 +7,13 @@ use crate::{data::{DataConverter, DataSheet, DataStorage}, layers::Layer};
 
 
 /// Turns a row of a [`DataSheet`] into the numbers the rest of the model works with.  It must be
-/// the first layer of a model.  It replaces a separate scalars layer: numeric columns are
-/// normalized here, and enum columns are one-hot encoded so the model never treats an option's
-/// position as a size.
+/// the layer of a model's input nodes, the nodes with no inputs.  It replaces a separate scalars
+/// layer: numeric columns are normalized here, and enum columns are one-hot encoded so the model
+/// never treats an option's position as a size.
+///
+/// Fields:
+/// * columns: The input columns and their converters, in the order their weights appear.  `None`
+///   until `prepare_train` fits them to the sample data.
 #[derive(Getters, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct InputSchema {
     #[getset(get = "pub")]
@@ -34,6 +38,14 @@ pub struct SchemaColumn {
 
 impl SchemaColumn {
     /// Pairs each converter from one of the data sheet build functions with its column index.
+    ///
+    /// # Parameters
+    /// * sheet: The sheet the converters were built from, used to look up each column's index.
+    /// * converters: Column names and their fitted converters, from
+    ///   `DataSheet::build_input_schema` or `DataSheet::build_output_schema`.
+    ///
+    /// # Errors
+    /// * `sheet` has no column with one of the converters' names.
     pub fn from_converters(
         sheet: &DataSheet,
         converters: Vec<(String, DataConverter)>
@@ -103,6 +115,15 @@ impl Layer for InputSchema {
 
 /// Encodes the given columns of every row into one flat batch, one batch row per data sheet row
 /// with the columns joined in order.  Shared by the input and output schemas.
+///
+/// # Parameters
+/// * columns: The columns to encode and their converters, in the order they are joined.
+/// * rows: The data sheet rows to encode, each laid out in column index order.
+/// * kind: What the columns are, such as "input" or "output", used in error messages.
+///
+/// # Errors
+/// * A row has no value for one of the columns.
+/// * A value cannot be encoded by its column's converter.
 pub(crate) fn encode_columns(
     columns: &[SchemaColumn],
     rows: &[&[DataStorage]],

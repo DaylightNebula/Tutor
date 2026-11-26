@@ -11,9 +11,9 @@ use crate::{data::DataSheet, layers::Layer};
 ///
 /// Holds the raw, learnable numbers of the model.  Every output is a weighted sum of every
 /// input plus a bias, so this is the layer that actually "learns" during training.  Its outputs
-/// are raw scores rather than probabilities; follow it with a layer like
-/// [`SoftMax`](crate::layers::softmax::SoftMax) to turn them into probabilities, or with
-/// [`ZeroNegative`](crate::layers::zero_neg::ZeroNegative) to build a hidden layer.
+/// are raw scores rather than probabilities; feed them to an
+/// [`OutputSchema`](crate::layers::output_schema::OutputSchema) to turn them into predictions, or
+/// to a [`ZeroNegative`](crate::layers::zero_neg::ZeroNegative) to build a hidden layer.
 ///
 /// # How it works
 ///
@@ -118,7 +118,12 @@ pub struct WeightsTrainingInfo {
 }
 
 impl Weights {
-    /// Create a new weights instance of the given size.
+    /// Creates a weights layer with the given number of outputs.  The weights themselves are
+    /// sized and randomized by `prepare_train` once the layer's number of inputs is known.
+    ///
+    /// # Parameters
+    /// * num_outputs: The number of outputs (depth) of the layer.
+    /// * weight_decay: Strength (λ) of the pull toward zero applied to weights each step.
     pub fn random(num_outputs: usize, weight_decay: f32) -> Self {
         Self {
             contents: None,
@@ -131,6 +136,7 @@ impl Weights {
 #[typetag::serde]
 impl Layer for Weights {
 
+    /// One output per unit of depth, whatever the number of inputs.
     fn output_size(&self, _input_count: usize) -> usize { self.depth }
 
     /// Sizes the weights to `input_count` inputs with fresh random values and clears any gradients
@@ -152,11 +158,8 @@ impl Layer for Weights {
         Ok(())
     }
 
-    /// Use the model to take a batch of <width> inputs, score, then return <depth> outputs per row.
-    ///
-    /// The output numbers from this will be kind of random, not a probability, use
-    /// a function like a softmax to turn it into a probability of one output being the
-    /// most likely.
+    /// Takes a batch of `width` inputs per row and gives `depth` raw scores per row.  The scores
+    /// are not probabilities, an `OutputSchema` turns them into predictions.
     ///
     /// # Errors
     /// * The layer has not been prepared.

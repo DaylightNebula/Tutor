@@ -48,26 +48,28 @@ use crate::{data::DataSheet, layers::Layer};
 ///   activation because it is cheap and trains well.
 /// * Clamping any intermediate value that must not be negative.
 ///
-/// Fields:
-/// * width: Number of inputs, which is also the number of outputs.
+/// This layer has no fields, its number of outputs is always its number of inputs.
 #[derive(Copy, Clone, Debug, CopyGetters, Serialize, Deserialize)]
 pub struct ZeroNegative;
 
 #[typetag::serde]
 impl Layer for ZeroNegative {
 
+    /// One output per input.
     fn output_size(&self, input_count: usize) -> usize { input_count }
 
+    /// Nothing to prepare, the layer has no parameters.
     fn prepare_train(&mut self, _sample_data: &DataSheet, _input_count: usize) -> anyhow::Result<()> {
         Ok(())
     }
 
+    /// Replaces every negative input with 0.
     fn transform(&self, inputs: ArrayView2<f32>) -> anyhow::Result<Array2<f32>> {
         Ok(inputs.mapv(|x| x.max(0.0)))
     }
 
-    /// Apply the same rule as transform by zipping inputs with gradients to
-    /// effectively reverse this layer.
+    /// Passes back the gradient of every positive input and 0 for every other, the derivative of
+    /// `transform`.
     fn back_propagate(
         &mut self,
         inputs: ArrayView2<f32>,

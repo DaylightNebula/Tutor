@@ -10,7 +10,8 @@ use crate::{
 };
 
 /// Turns the raw scores of the layer before it into predictions for every output column, and
-/// reads them back into [`DataSheet`] values.  It must be the last layer of a model.
+/// reads them back into [`DataSheet`] values.  It must be the layer of a model's output nodes,
+/// the nodes no other node reads from.
 ///
 /// Enum columns get one score per option, turned into probabilities with a softmax, so this
 /// layer replaces a separate softmax layer.  Decimal and integer columns get a single score that
