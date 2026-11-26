@@ -1,0 +1,46 @@
+{
+  "editor_positions": {
+    "18f77572-47f3-4277-b62b-32457f9b05e7": [
+      646.08984375,
+      284.203125
+    ],
+    "345fa882-e52e-4b6a-a080-e47fcf7ce59a": [
+      98.27734375,
+      211.87890625
+    ],
+    "6b08c696-1084-4a85-846f-5aa777cd2f1e": [
+      368.06640625,
+      247.41015625
+    ]
+  },
+  "last_added": "18f77572-47f3-4277-b62b-32457f9b05e7",
+  "nodes": {
+    "18f77572-47f3-4277-b62b-32457f9b05e7": {
+      "inputs": [
+        "6b08c696-1084-4a85-846f-5aa777cd2f1e"
+      ],
+      "layer": {
+        "columns": null,
+        "type": "OutputSchema"
+      }
+    },
+    "345fa882-e52e-4b6a-a080-e47fcf7ce59a": {
+      "inputs": [],
+      "layer": {
+        "columns": null,
+        "type": "InputSchema"
+      }
+    },
+    "6b08c696-1084-4a85-846f-5aa777cd2f1e": {
+      "inputs": [
+        "345fa882-e52e-4b6a-a080-e47fcf7ce59a"
+      ],
+      "layer": {
+        "contents": null,
+        "depth": 3,
+        "type": "Weights",
+        "weight_decay": 0.0
+      }
+    }
+  }
+}

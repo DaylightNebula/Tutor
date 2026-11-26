@@ -2,7 +2,7 @@ use getset::CopyGetters;
 use ndarray::{Array2, ArrayView2, Zip};
 use serde::{Deserialize, Serialize};
 
-use crate::{data::DataSheet, layers::Layer};
+use crate::{data::DataSheet, layers::{Layer, LayerType}};
 
 /// ZeroNegative (ReLU activation layer)
 ///
@@ -51,6 +51,10 @@ use crate::{data::DataSheet, layers::Layer};
 /// This layer has no fields, its number of outputs is always its number of inputs.
 #[derive(Copy, Clone, Debug, CopyGetters, Serialize, Deserialize)]
 pub struct ZeroNegative;
+
+inventory::submit! {
+    LayerType { name: "ZeroNegative", create: || Box::new(ZeroNegative) }
+}
 
 #[typetag::serde]
 impl Layer for ZeroNegative {

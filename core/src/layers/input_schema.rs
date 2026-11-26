@@ -3,7 +3,7 @@ use getset::{CopyGetters, Getters};
 use ndarray::{Array2, ArrayView2};
 use serde::{Deserialize, Serialize};
 
-use crate::{data::{DataConverter, DataSheet, DataStorage}, layers::Layer};
+use crate::{data::{DataConverter, DataSheet, DataStorage}, layers::{Layer, LayerType}};
 
 
 /// Turns a row of a [`DataSheet`] into the numbers the rest of the model works with.  It must be
@@ -60,6 +60,10 @@ impl SchemaColumn {
 impl InputSchema {
     /// Creates an input schema layer that is fitted to its columns when the model is built.
     pub fn new() -> Self { Self::default() }
+}
+
+inventory::submit! {
+    LayerType { name: "InputSchema", create: || Box::new(InputSchema::new()) }
 }
 
 #[typetag::serde]

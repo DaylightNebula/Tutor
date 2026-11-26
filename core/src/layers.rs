@@ -3,9 +3,37 @@ pub mod output_schema;
 pub mod weights;
 pub mod zero_neg;
 
+use std::fmt::Debug;
+
 use ndarray::{Array2, ArrayView2};
 
 use crate::{data::{DataSheet, DataStorage}, model::ColumnScore};
+
+/// A kind of layer that can be created without any settings, listed with `inventory::submit!`
+/// next to the layer's `Layer` impl so tools such as the model editor can offer every layer.
+///
+/// Fields:
+/// * name: The layer's typetag name, the `type` it is saved with.
+/// * create: Creates the layer with default settings, ready to be added to a model design.
+#[derive(Debug)]
+pub struct LayerType {
+    pub name: &'static str,
+    pub create: fn() -> Box<dyn Layer>
+}
+
+inventory::collect!(LayerType);
+
+/// Every registered layer type, sorted by name so menus list them in a stable order.
+///
+/// Types are collected from every `inventory::submit!` of a [`LayerType`] in the program, so
+/// layers defined outside this crate are included as long as their crate is linked in.
+pub fn layer_types() -> Vec<&'static LayerType> {
+    let mut types = inventory::iter::<LayerType>
+        .into_iter()
+        .collect::<Vec<_>>();
+    types.sort_by_key(|layer_type| layer_type.name);
+    types
+}
 
 /// Layers are simply something that takes x inputs and turns them into y outputs.
 /// These may be anything from an output schema for probability outputs, predict via weights,
@@ -19,8 +47,11 @@ use crate::{data::{DataSheet, DataStorage}, model::ColumnScore};
 /// outputs through `encode_targets`, `output_loss`, `evaluate`, and `decode_outputs`.  Only the
 /// [`InputSchema`](input_schema::InputSchema) and [`OutputSchema`](output_schema::OutputSchema)
 /// layers implement those, every other layer keeps the default that returns an error.
+///
+/// Layers are `Debug + Send` so tools such as the model editor can hold and move them between
+/// threads, and every layer type is listed with [`LayerType`] so tools can offer new ones.
 #[typetag::serde(tag = "type")]
-pub trait Layer {
+pub trait Layer: Debug + Send {
 
     /// The number of outputs this layer will produce per row, used to size the layers after it
     /// and to check that the widths of a model's layers line up.

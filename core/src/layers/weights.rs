@@ -3,7 +3,7 @@ use ndarray::{Array1, Array2, ArrayView2, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use serde::{Deserialize, Serialize};
 
-use crate::{data::DataSheet, layers::Layer};
+use crate::{data::DataSheet, layers::{Layer, LayerType}};
 
 /// Weights (fully connected / dense / linear layer)
 ///
@@ -131,6 +131,10 @@ impl Weights {
             depth: num_outputs, weight_decay
         }
     }
+}
+
+inventory::submit! {
+    LayerType { name: "Weights", create: || Box::new(Weights::random(1, 0.0)) }
 }
 
 #[typetag::serde]

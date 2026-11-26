@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     data::{DataConverter, DataSheet, DataStorage},
-    layers::{Layer, input_schema::{SchemaColumn, encode_columns}},
+    layers::{Layer, LayerType, input_schema::{SchemaColumn, encode_columns}},
     model::ColumnScore
 };
 
@@ -78,6 +78,10 @@ impl OutputSchema {
         );
         Ok(slices)
     }
+}
+
+inventory::submit! {
+    LayerType { name: "OutputSchema", create: || Box::new(OutputSchema::new()) }
 }
 
 #[typetag::serde]
