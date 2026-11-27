@@ -1,12 +1,12 @@
-use std::collections::{BTreeMap, HashMap};
+use std::{collections::{BTreeMap, HashMap}, sync::{Arc, Mutex}};
 
 use deltos_node_graphs::{editor::NodeGraphEditor, tiles::NodeGraphTile};
-use gearbox::{anyhow::{self, Context}, glam::Vec2};
+use gearbox::{anyhow::{self, Context}, glam::Vec2, ui::UiBundle};
 use serde_json::Value;
 use tutor_core::{designer::ModelDesigner, layers::layer_types, model::ModelNode};
 use uuid::Uuid;
 
-use crate::tiles::{LayerTile, OUTPUT, copy_layer, input_slot, slot_index};
+use crate::{schema::{self, SharedSchema}, tiles::{LayerTile, OUTPUT, copy_layer, input_slot, slot_index}};
 
 /// Key of the tile positions in a saved design.  `ModelDesigner` ignores keys it doesn't know,
 /// so designs saved by the editor still load anywhere else.
@@ -24,13 +24,16 @@ const LAYOUT_ROW_SPACING: f32 = 220.0;
 /// Node graph editor for model design files (`.design`), the json written by
 /// `ModelDesigner::serialize`.  Each node of the design is a tile, and each wire into a tile's
 /// input slot is one of the node's inputs, joined in slot order.  Tile positions are saved in the
-/// design under `POSITIONS_KEY`, and tiles without a saved position are laid out by depth.
+/// design under `POSITIONS_KEY`, and tiles without a saved position are laid out by depth.  The
+/// design's schema is edited from the SCHEMA overlay in the graph's top left.
 ///
 /// Fields:
 /// * tiles: A tile per node of the design.
+/// * schema: The design's input and output columns, shared with the overlay that edits them.
 #[derive(Debug, Default)]
 pub struct ModelEditor {
-    tiles: Vec<LayerTile>
+    tiles: Vec<LayerTile>,
+    schema: SharedSchema
 }
 
 impl ModelEditor {
@@ -89,7 +92,7 @@ impl NodeGraphEditor for ModelEditor {
         }
 
         // wire each node's inputs into its slots, in order
-        let mut editor = Self { tiles };
+        let mut editor = Self { tiles, schema: Arc::new(Mutex::new(designer.schema().clone())) };
         for (id, node) in &nodes {
             for (slot, input) in node.inputs().iter().enumerate() {
                 editor.tiles
@@ -108,6 +111,7 @@ impl NodeGraphEditor for ModelEditor {
         for tile in &self.tiles {
             designer.insert_node(tile.tile_id(), copy_layer(tile.layer())?, self.inputs_of(tile.tile_id()))?;
         }
+        designer.set_schema(schema::lock(&self.schema).clone());
 
         // add the positions, writing through a json value so keys always come out in the same order
         let mut saved: Value = serde_json::from_str(&designer.serialize()?)?;
@@ -151,6 +155,8 @@ impl NodeGraphEditor for ModelEditor {
     fn tiles(&self) -> &[LayerTile] { &self.tiles }
 
     fn tiles_mut(&mut self) -> &mut [LayerTile] { &mut self.tiles }
+
+    fn overlay(&self) -> Option<UiBundle> { Some(schema::overlay(&self.schema)) }
 }
 
 /// Places every node in a column by its depth, the longest chain of nodes feeding it, so data
@@ -209,7 +215,7 @@ fn depth_of(id: Uuid, inputs: &HashMap<Uuid, &Vec<Uuid>>, depths: &mut HashMap<U
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutor_core::layers::{input_schema::InputSchema, output_schema::OutputSchema, weights::Weights, zero_neg::ZeroNegative};
+    use tutor_core::{data::{DataType, DesignSchema, SchemaEntry}, layers::{input_schema::InputSchema, output_schema::OutputSchema, weights::Weights, zero_neg::ZeroNegative}};
 
     /// A design where two input nodes feed a weights node in the order `[second, first]`,
     /// followed by an activation and an output.  Gives the design and the node IDs in the order
@@ -339,6 +345,46 @@ mod tests {
         assert_eq!(titles, ["InputSchema", "OutputSchema", "Weights", "ZeroNegative"]);
         assert_eq!(ModelDesigner::deserialize(&editor.save()?)?.nodes().len(), 4);
         Ok(())
+    }
+
+    #[test]
+    fn schemas_are_saved_and_reopened_in_order() -> anyhow::Result<()> {
+        let (mut designer, _) = design();
+        let schema = DesignSchema {
+            inputs: vec![
+                SchemaEntry { name: "petal_length".into(), data_type: DataType::Decimal },
+                SchemaEntry { name: "colour".into(), data_type: DataType::Enum }
+            ],
+            outputs: vec![SchemaEntry { name: "species".into(), data_type: DataType::Enum }]
+        };
+        designer.set_schema(schema.clone());
+
+        let editor = ModelEditor::open(&designer.serialize()?)?;
+        let reopened = ModelEditor::open(&editor.save()?)?;
+
+        assert_eq!(*schema::lock(&reopened.schema), schema);
+        assert_eq!(ModelDesigner::deserialize(&reopened.save()?)?.schema(), &schema);
+        Ok(())
+    }
+
+    #[test]
+    fn designs_saved_without_a_schema_open_with_an_empty_one() -> anyhow::Result<()> {
+        let (designer, _) = design();
+        let mut saved: Value = serde_json::from_str(&designer.serialize()?)?;
+        saved
+            .as_object_mut()
+            .context("design wasn't saved as an object")?
+            .remove("schema");
+
+        let editor = ModelEditor::open(&saved.to_string())?;
+
+        assert_eq!(*schema::lock(&editor.schema), DesignSchema::default());
+        Ok(())
+    }
+
+    #[test]
+    fn the_overlay_is_always_drawn() {
+        assert!(ModelEditor::default().overlay().is_some());
     }
 
     #[test]

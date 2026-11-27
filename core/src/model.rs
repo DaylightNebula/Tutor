@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fmt, time::Instant};
+use std::{collections::VecDeque, fmt, sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
 
 use ahash::{HashMap, HashMapExt};
 use anyhow::Context;
@@ -151,6 +151,41 @@ impl fmt::Display for Evaluation {
         }
         Ok(())
     }
+}
+
+/// A progress report from `Model::train_with_progress`, sent every few epochs.
+///
+/// Fields:
+/// * epoch: How many epochs have run so far.
+/// * loss: The average loss of the latest epoch.
+/// * best_loss: The lowest epoch loss so far.
+/// * evaluation: The scores of the model on the training rows after the latest epoch.
+/// * elapsed: How long training has run so far.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrainingProgress {
+    pub epoch: u32,
+    pub loss: f32,
+    pub best_loss: f32,
+    pub evaluation: Evaluation,
+    pub elapsed: Duration
+}
+
+/// The result of a finished `Model::train_with_progress` run.
+///
+/// Fields:
+/// * epochs: How many epochs ran before the loss plateaued or training was stopped.
+/// * stopped: Whether training was stopped early through its stop flag, instead of running until
+///   the loss plateaued.
+/// * best_loss: The lowest epoch loss reached.
+/// * evaluation: The scores of the trained model on the training rows.
+/// * duration: How long training took.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrainingSummary {
+    pub epochs: u32,
+    pub stopped: bool,
+    pub best_loss: f32,
+    pub evaluation: Evaluation,
+    pub duration: Duration
 }
 
 /// Every node's output for one batch, keyed by node ID.
@@ -424,9 +459,7 @@ impl Model {
     /// * max_epoch_no_improve: How many epochs in a row may fail to improve before training stops.
     ///
     /// # Errors
-    /// * The rows cannot be encoded, see `encode`.
-    /// * An epoch fails, see `train_encoded`.
-    /// * The model cannot be scored, see `evaluate_encoded`.
+    /// * Training fails, see `train_with_progress`.
     pub fn train_until_stop_improvement(
         &mut self,
         data: &DataSheet,
@@ -435,6 +468,58 @@ impl Model {
         min_req_improve: f32,
         max_epoch_no_improve: u32
     ) -> anyhow::Result<()> {
+        let summary = self.train_with_progress(
+            data,
+            learning_rate,
+            batch_size,
+            min_req_improve,
+            max_epoch_no_improve,
+            100,
+            &AtomicBool::new(false),
+            |progress| println!("Epoch {}:  Loss {:.4}  {}", progress.epoch, progress.loss, progress.evaluation)
+        )?;
+        println!(
+            "Stopped at epoch {}: loss plateaued at {:.4}, {}, training took {} ms",
+            summary.epochs, summary.best_loss, summary.evaluation, summary.duration.as_millis()
+        );
+        Ok(())
+    }
+
+    /// Trains this model until its loss stops improving, reporting progress as it goes.
+    ///
+    /// Runs epochs until `max_epoch_no_improve` epochs in a row fail to lower the best loss by at
+    /// least the `min_req_improve` fraction, or until `stop` is set.  `stop` is checked after
+    /// every epoch, so training stops at the end of the epoch running when it is set, keeping
+    /// what it learned so far.  Every `report_every` epochs the model is scored on the training
+    /// rows and `on_progress` is called with the scores, so callers such as a UI can show how
+    /// training is going.
+    ///
+    /// # Parameters
+    /// * data: The rows to train on.
+    /// * learning_rate: How far each step moves the parameters against their gradients.
+    /// * batch_size: The number of rows per parameter step.
+    /// * min_req_improve: The fraction the loss must drop by for an epoch to count as improving.
+    /// * max_epoch_no_improve: How many epochs in a row may fail to improve before training stops.
+    /// * report_every: How many epochs pass between progress reports.  0 never reports.
+    /// * stop: Set from any thread to stop training after the current epoch.
+    /// * on_progress: Called with each progress report.
+    ///
+    /// # Errors
+    /// * The rows cannot be encoded, see `encode`.
+    /// * An epoch fails, see `train_encoded`.
+    /// * The model cannot be scored, see `evaluate_encoded`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn train_with_progress(
+        &mut self,
+        data: &DataSheet,
+        learning_rate: f32,
+        batch_size: usize,
+        min_req_improve: f32,
+        max_epoch_no_improve: u32,
+        report_every: u32,
+        stop: &AtomicBool,
+        mut on_progress: impl FnMut(&TrainingProgress)
+    ) -> anyhow::Result<TrainingSummary> {
         let start_time = Instant::now();
         let encoded = self.encode(data)?;
         let mut best_loss = f32::INFINITY;
@@ -453,20 +538,29 @@ impl Model {
                 epochs_without_improvement += 1;
             }
 
-            // report progress every 100 epochs
-            if epoch % 100 == 0 {
-                println!("Epoch {epoch}:  Loss {loss:.4}  {}", self.evaluate_encoded(&encoded)?);
+            // report progress every few epochs
+            if report_every > 0 && epoch % report_every == 0 {
+                on_progress(&TrainingProgress {
+                    epoch,
+                    loss,
+                    best_loss,
+                    evaluation: self.evaluate_encoded(&encoded)?,
+                    elapsed: start_time.elapsed()
+                });
             }
 
-            // stop and report once the loss has plateaued
-            if epochs_without_improvement >= max_epoch_no_improve {
-                let end = start_time.elapsed();
-                println!("Stopped at epoch {epoch}: loss plateaued at {best_loss:.4}, {}, training took {} ms", self.evaluate_encoded(&encoded)?, end.as_millis());
-                break;
+            // stop and summarize once the loss has plateaued or a stop was asked for
+            let stopped = stop.load(Ordering::Relaxed);
+            if stopped || epochs_without_improvement >= max_epoch_no_improve {
+                return Ok(TrainingSummary {
+                    epochs: epoch,
+                    stopped,
+                    best_loss,
+                    evaluation: self.evaluate_encoded(&encoded)?,
+                    duration: start_time.elapsed()
+                });
             }
         }
-
-        Ok(())
     }
 
     /// Scores how well this model predicts each output column of a data sheet's rows, see

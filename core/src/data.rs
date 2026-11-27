@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 /// * Decimal: A floating point number, stored as an `f32`.
 /// * Integer: A whole number, stored as an `i32`.
 /// * Enum: One option out of a fixed set of text options.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum DataType {
+    #[default]
     Decimal,
     Integer,
     Enum
@@ -478,6 +479,45 @@ impl Schema {
     /// * data_type: The type of every value in the column.
     pub fn push(&mut self, name: impl Into<String>, role: Role, data_type: DataType) {
         self.0.insert(name.into(), (data_type, role));
+    }
+}
+
+/// One named column of a [`DesignSchema`].
+///
+/// Fields:
+/// * name: Name of the column, matched against csv headers.
+/// * data_type: Type of every value in the column.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SchemaEntry {
+    pub name: String,
+    pub data_type: DataType
+}
+
+/// The columns a model design reads and predicts, kept in the order they were listed.  Saved
+/// with a design, and turned into a data sheet [`Schema`] with `to_schema`.
+///
+/// Fields:
+/// * inputs: Columns the model reads to make its predictions.
+/// * outputs: Columns the model predicts.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesignSchema {
+    pub inputs: Vec<SchemaEntry>,
+    pub outputs: Vec<SchemaEntry>
+}
+
+impl DesignSchema {
+    /// Converts this design schema into a data sheet [`Schema`], giving inputs the
+    /// [`Role::Input`] role and outputs the [`Role::Output`] role.  A name used more than once
+    /// keeps its last entry, outputs coming after inputs.
+    pub fn to_schema(&self) -> Schema {
+        let mut schema = Schema::new();
+        for entry in &self.inputs {
+            schema.push(entry.name.clone(), Role::Input, entry.data_type);
+        }
+        for entry in &self.outputs {
+            schema.push(entry.name.clone(), Role::Output, entry.data_type);
+        }
+        schema
     }
 }
 

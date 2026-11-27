@@ -4,7 +4,7 @@ use getset::Getters;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{data::DataSheet, layers::Layer, model::{Model, ModelNode}};
+use crate::{data::{DataSheet, DesignSchema}, layers::Layer, model::{Model, ModelNode}};
 
 /// The network of a model before it is fitted to any data.  It can be saved as json and built
 /// into a [`Model`] once sample data is available.
@@ -17,12 +17,17 @@ use crate::{data::DataSheet, layers::Layer, model::{Model, ModelNode}};
 ///   and should be `InputSchema`s, and nodes no other node reads from are outputs and should be
 ///   `OutputSchema`s.
 /// * last_added: The most recently added node, which `add_layer` chains the next layer after.
+/// * schema: The named, typed columns the model reads and predicts.  Empty for designs saved
+///   before schemas existed.
 #[derive(Getters, Default, Serialize, Deserialize)]
 pub struct ModelDesigner {
     #[getset(get = "pub")]
     nodes: HashMap<Uuid, ModelNode>,
     #[serde(default)]
-    last_added: Option<Uuid>
+    last_added: Option<Uuid>,
+    #[getset(get = "pub")]
+    #[serde(default)]
+    schema: DesignSchema
 }
 
 impl ModelDesigner {
@@ -97,6 +102,14 @@ impl ModelDesigner {
         Ok(())
     }
 
+    /// Replaces the columns this design reads and predicts.
+    ///
+    /// # Parameters
+    /// * schema: The new input and output columns.
+    pub fn set_schema(&mut self, schema: DesignSchema) {
+        self.schema = schema;
+    }
+
     /// Builds this design into a `Model` fitted to some sample data.
     ///
     /// Works out the order the nodes run in, prepares each layer in that order, then runs one
@@ -126,5 +139,76 @@ impl ModelDesigner {
             .context("model design does not fit the sample data")?;
 
         Ok(model)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    use crate::{data::{DataType, Role, SchemaEntry}, layers::{input_schema::InputSchema, output_schema::OutputSchema, weights::Weights}};
+
+    /// A schema with input `x` (decimal) and output `label` (enum).
+    fn schema() -> DesignSchema {
+        DesignSchema {
+            inputs: vec![SchemaEntry { name: "x".into(), data_type: DataType::Decimal }],
+            outputs: vec![SchemaEntry { name: "label".into(), data_type: DataType::Enum }]
+        }
+    }
+
+    #[test]
+    fn schemas_survive_serialization() -> anyhow::Result<()> {
+        let mut designer = ModelDesigner::new();
+        designer.set_schema(schema());
+
+        let reread = ModelDesigner::deserialize(&designer.serialize()?)?;
+
+        assert_eq!(reread.schema(), &schema());
+        Ok(())
+    }
+
+    #[test]
+    fn designs_without_a_schema_still_load() -> anyhow::Result<()> {
+        let designer = ModelDesigner::deserialize(r#"{"nodes": {}}"#)?;
+
+        assert_eq!(designer.schema(), &DesignSchema::default());
+        Ok(())
+    }
+
+    #[test]
+    fn design_schemas_become_data_sheet_schemas() {
+        let converted = schema().to_schema();
+
+        let mut columns = converted
+            .iter()
+            .map(|(name, (data_type, role))| (name.clone(), *data_type, *role))
+            .collect::<Vec<_>>();
+        columns.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(columns, [
+            ("label".to_string(), DataType::Enum, Role::Output),
+            ("x".to_string(), DataType::Decimal, Role::Input)
+        ]);
+    }
+
+    #[test]
+    fn training_stops_after_the_epoch_the_stop_flag_is_set_in() -> anyhow::Result<()> {
+        let mut designer = ModelDesigner::new()
+            .add_layer(InputSchema::new())?
+            .add_layer(Weights::random(2, 1e-2))?
+            .add_layer(OutputSchema::new())?;
+        designer.set_schema(schema());
+        let mut csv = String::from("x,label\n");
+        for i in 0 .. 20 {
+            csv.push_str(&format!("{i},{}\n", if i > 10 { "high" } else { "low" }));
+        }
+        let sheet = DataSheet::from_csv(designer.schema().to_schema(), &csv)?;
+        let mut model = designer.build(&sheet)?;
+
+        let summary = model.train_with_progress(&sheet, 0.05, 4, 1e-4, 50, 1, &AtomicBool::new(true), |_| {})?;
+
+        assert_eq!(summary.epochs, 1);
+        assert!(summary.stopped);
+        Ok(())
     }
 }

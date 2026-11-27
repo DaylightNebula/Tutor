@@ -42,5 +42,31 @@
         "weight_decay": 0.0
       }
     }
+  },
+  "schema": {
+    "inputs": [
+      {
+        "data_type": "Decimal",
+        "name": "SepalLengthCm"
+      },
+      {
+        "data_type": "Decimal",
+        "name": "SepalWidthCm"
+      },
+      {
+        "data_type": "Decimal",
+        "name": "PetalLengthCm"
+      },
+      {
+        "data_type": "Decimal",
+        "name": "PetalWidthCm"
+      }
+    ],
+    "outputs": [
+      {
+        "data_type": "Decimal",
+        "name": "Species"
+      }
+    ]
   }
 }
