@@ -64,7 +64,7 @@
     ],
     "outputs": [
       {
-        "data_type": "Decimal",
+        "data_type": "Enum",
         "name": "Species"
       }
     ]
